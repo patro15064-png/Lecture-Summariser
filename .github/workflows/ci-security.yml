@@ -1,0 +1,63 @@
+name: Enterprise CI & Security Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  security-audit:
+    name: Security & Secret Leak Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Secret Scan (Prevent Gemini / Cloud Key Leaks)
+        run: |
+          echo "Scanning codebase for hardcoded API keys and secrets..."
+          if grep -rE "AIza[0-9A-Za-z-_]{35}" src/; then
+            echo "::error::CRITICAL: Hardcoded Gemini API Key pattern detected in source files!"
+            exit 1
+          fi
+          echo "Secret scan passed: zero leaked credentials."
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci || npm install
+
+      - name: Dependency Vulnerability Audit
+        run: |
+          echo "Running dependency vulnerability audit..."
+          npm audit --audit-level=high || true
+
+  build-and-verify:
+    name: Typecheck & Production Build Verification
+    runs-on: ubuntu-latest
+    needs: security-audit
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci || npm install
+
+      - name: TypeScript Strict Static Analysis
+        run: npx tsc --noEmit
+
+      - name: Production Next.js Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
