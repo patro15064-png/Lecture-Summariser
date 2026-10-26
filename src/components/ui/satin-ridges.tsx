@@ -23,22 +23,52 @@ export default function SatinRidges({
     if (!ctx) return;
 
     let animationFrameId: number;
-    let width = (canvas.width = window.innerWidth);
-    let height = (canvas.height = window.innerHeight);
+    let width = 0;
+    let height = 0;
 
-    const handleResize = () => {
+    const updateDimensions = () => {
       if (!canvas) return;
+      // Cap device pixel ratio to 1 for high-efficiency fill rate
       width = canvas.width = window.innerWidth;
       height = canvas.height = window.innerHeight;
     };
+    updateDimensions();
 
-    window.addEventListener('resize', handleResize);
+    let isScrolling = false;
+    let scrollTimeout: NodeJS.Timeout | null = null;
+
+    const onScroll = () => {
+      isScrolling = true;
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        isScrolling = false;
+      }, 120);
+    };
+
+    window.addEventListener('resize', updateDimensions, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true });
 
     let t = 0;
+    let lastFrameTime = performance.now();
+    const targetFps = 30; // 30 FPS ambient wave is butter smooth and cuts GPU fill rate by 50%
+    const frameInterval = 1000 / targetFps;
 
     // Rich color palette: deep midnight obsidian, violet-indigo satin waves, specular silver highlights
-    const render = () => {
-      t += 0.003 * speed;
+    const render = (now: number) => {
+      animationFrameId = requestAnimationFrame(render);
+
+      // If user is actively scrolling, skip heavy 2D canvas repaints to give 100% compositor headroom
+      if (isScrolling) {
+        return;
+      }
+
+      const elapsed = now - lastFrameTime;
+      if (elapsed < frameInterval) {
+        return;
+      }
+      lastFrameTime = now - (elapsed % frameInterval);
+
+      t += 0.005 * speed;
       ctx.clearRect(0, 0, width, height);
 
       // Deep dark background gradient
@@ -49,27 +79,27 @@ export default function SatinRidges({
       ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, width, height);
 
-      // Render 8 layers of flowing satin folds with specular highlights
-      const numRidges = 8;
+      // Render 5 layers of flowing satin folds (reduced from 8 for high performance)
+      const numRidges = 5;
       for (let i = 0; i < numRidges; i++) {
         ctx.beginPath();
 
-        const offsetPhase = (i * Math.PI) / 4;
-        const baseY = height * (0.2 + (i / numRidges) * 0.7);
-        const waveHeight = (height * 0.08 + i * 14) * intensity;
+        const offsetPhase = (i * Math.PI) / 3;
+        const baseY = height * (0.25 + (i / numRidges) * 0.65);
+        const waveHeight = (height * 0.07 + i * 16) * intensity;
 
         ctx.moveTo(0, height);
         ctx.lineTo(0, baseY);
 
-        const step = Math.max(16, width / 60);
+        // Optimized step size (cuts loop iterations)
+        const step = Math.max(28, width / 40);
         for (let x = 0; x <= width + step; x += step) {
           const normX = x / width;
           // Dual sine wave superposition to create realistic fabric folds
           const fold1 = Math.sin(normX * 3.5 + t * 1.2 + offsetPhase);
-          const fold2 = Math.cos(normX * 6.2 - t * 0.8 + offsetPhase * 1.5) * 0.5;
-          const fold3 = Math.sin(normX * 1.8 + t * 0.4) * 0.8;
+          const fold2 = Math.cos(normX * 5.8 - t * 0.8 + offsetPhase * 1.5) * 0.5;
           
-          const y = baseY + (fold1 + fold2 + fold3) * waveHeight * 0.5;
+          const y = baseY + (fold1 + fold2) * waveHeight * 0.55;
           ctx.lineTo(x, y);
         }
 
@@ -84,29 +114,25 @@ export default function SatinRidges({
           baseY + waveHeight * 2
         );
 
-        const alpha = (0.07 + (i / numRidges) * 0.12) * intensity;
+        const alpha = (0.08 + (i / numRidges) * 0.12) * intensity;
         
-        // Alternating iridescent satin colors (indigo, violet, celestial cyan, soft silver)
-        if (i % 3 === 0) {
-          ridgeGrad.addColorStop(0, `rgba(99, 102, 241, ${alpha * 1.4})`); // Indigo 500
-          ridgeGrad.addColorStop(0.5, `rgba(168, 85, 247, ${alpha * 0.9})`); // Violet 500
-          ridgeGrad.addColorStop(1, `rgba(15, 23, 42, ${alpha * 0.4})`);
-        } else if (i % 3 === 1) {
-          ridgeGrad.addColorStop(0, `rgba(147, 51, 234, ${alpha * 1.3})`); // Purple 600
-          ridgeGrad.addColorStop(0.4, `rgba(59, 130, 246, ${alpha * 0.8})`); // Blue 500
-          ridgeGrad.addColorStop(1, `rgba(2, 6, 23, ${alpha * 0.3})`);
+        // Alternating iridescent satin colors (indigo, violet, celestial cyan)
+        if (i % 2 === 0) {
+          ridgeGrad.addColorStop(0, `rgba(99, 102, 241, ${alpha * 1.3})`); // Indigo 500
+          ridgeGrad.addColorStop(0.5, `rgba(168, 85, 247, ${alpha * 0.85})`); // Violet 500
+          ridgeGrad.addColorStop(1, `rgba(15, 23, 42, ${alpha * 0.3})`);
         } else {
-          ridgeGrad.addColorStop(0, `rgba(56, 189, 248, ${alpha * 1.1})`); // Sky 400 highlight
-          ridgeGrad.addColorStop(0.5, `rgba(129, 140, 248, ${alpha * 0.8})`); // Indigo 400
-          ridgeGrad.addColorStop(1, `rgba(3, 7, 18, ${alpha * 0.2})`);
+          ridgeGrad.addColorStop(0, `rgba(147, 51, 234, ${alpha * 1.2})`); // Purple 600
+          ridgeGrad.addColorStop(0.5, `rgba(56, 189, 248, ${alpha * 0.8})`); // Sky 400
+          ridgeGrad.addColorStop(1, `rgba(2, 6, 23, ${alpha * 0.25})`);
         }
 
         ctx.fillStyle = ridgeGrad;
         ctx.fill();
 
-        // Add specular fold highlight stroke along the crest
-        ctx.strokeStyle = `rgba(224, 231, 255, ${0.08 * (i + 1) * intensity})`;
-        ctx.lineWidth = 1.2;
+        // Specular fold highlight stroke along the crest
+        ctx.strokeStyle = `rgba(224, 231, 255, ${0.07 * (i + 1) * intensity})`;
+        ctx.lineWidth = 1;
         ctx.stroke();
       }
 
@@ -114,24 +140,24 @@ export default function SatinRidges({
       const radialVignette = ctx.createRadialGradient(
         width * 0.5,
         height * 0.3,
-        50,
+        80,
         width * 0.5,
         height * 0.5,
-        Math.max(width, height) * 0.8
+        Math.max(width, height) * 0.75
       );
-      radialVignette.addColorStop(0, 'rgba(129, 140, 248, 0.06)');
-      radialVignette.addColorStop(0.5, 'rgba(15, 23, 42, 0.2)');
-      radialVignette.addColorStop(1, 'rgba(2, 6, 23, 0.85)');
+      radialVignette.addColorStop(0, 'rgba(129, 140, 248, 0.05)');
+      radialVignette.addColorStop(0.6, 'rgba(15, 23, 42, 0.2)');
+      radialVignette.addColorStop(1, 'rgba(2, 6, 23, 0.88)');
       ctx.fillStyle = radialVignette;
       ctx.fillRect(0, 0, width, height);
-
-      animationFrameId = requestAnimationFrame(render);
     };
 
-    render();
+    animationFrameId = requestAnimationFrame(render);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('resize', updateDimensions);
+      window.removeEventListener('scroll', onScroll);
+      if (scrollTimeout) clearTimeout(scrollTimeout);
       cancelAnimationFrame(animationFrameId);
     };
   }, [intensity, speed]);
@@ -148,6 +174,9 @@ export default function SatinRidges({
         height: '100vh',
         zIndex: -1,
         pointerEvents: 'none',
+        transform: 'translateZ(0)',
+        willChange: 'transform',
+        contain: 'strict',
       }}
       className={`fixed inset-0 pointer-events-none -z-10 h-full w-full ${className}`}
     />

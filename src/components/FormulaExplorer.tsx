@@ -11,6 +11,7 @@ import {
   Atom
 } from 'lucide-react';
 import { LectureArtifact, ConceptNode } from '@/types/lecture';
+import { MathView } from './MathView';
 
 interface FormulaExplorerProps {
   artifact: LectureArtifact;
@@ -129,7 +130,7 @@ export function FormulaExplorer({ artifact, onSeek }: FormulaExplorerProps) {
               Mathematical / Logical Formulation
             </span>
             <div className="text-lg sm:text-2xl font-mono font-bold text-white tracking-wide overflow-x-auto py-2">
-              <code>{activeConcept.formulaLatex}</code>
+              <MathView math={activeConcept.formulaLatex || ''} displayMode={true} />
             </div>
           </div>
 

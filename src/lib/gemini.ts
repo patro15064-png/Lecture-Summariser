@@ -252,13 +252,20 @@ export async function chatWithLecture(params: {
     .map((s) => `[${s.durationFormatted}] "${s.transcriptSnippet}" (Why it matters: ${s.whyItMatters})`)
     .join('\n');
 
+  const transcriptExcerpt = artifact.transcript?.segments
+    ? artifact.transcript.segments
+        .slice(0, 30)
+        .map((s) => `[${Math.floor(s.start / 60)}:${(s.start % 60).toString().padStart(2, '0')}] ${s.text}`)
+        .join('\n')
+    : '';
+
   if (activeKey) {
     try {
       const ai = new GoogleGenerativeAI(activeKey);
       const model = ai.getGenerativeModel({
         model: 'gemini-2.0-flash',
         systemInstruction: `You are an elite University Academic Tutor specializing in: "${artifact.title}" (${artifact.course}).
-Ground all answers strictly in the following verified lecture milestones and golden quotes:
+Ground all answers strictly in the following verified lecture milestones, transcript excerpts, and golden quotes:
 LECTURE CONTEXT:
 ${artifact.overview}
 Key Themes: ${artifact.keyThemes.join(', ')}
@@ -266,14 +273,17 @@ Key Themes: ${artifact.keyThemes.join(', ')}
 CONCEPTS & TIMESTAMPS:
 ${groundedContext}
 
+TRANSCRIPT EXCERPTS:
+${transcriptExcerpt}
+
 GOLDEN BREAKTHROUGH SNIPPETS:
 ${goldenContext}
 
 PEDAGOGICAL DIRECTIVE (${mode.toUpperCase()} MODE):
 ${
   mode === 'socratic'
-    ? 'Act as a Socratic mentor: Do not give the complete answer away immediately if the student is developing a concept. Ask guiding questions, point out conceptual contradictions, offer intuitive analogies, and reference specific timestamps using format [MM:SS] (e.g., "[05:20]") so the student can jump to the video.'
-    : 'Provide a direct, rigorous, clear explanation with mathematical precision, intuitive diagrams in text, and exact timestamp citations in format [MM:SS].'
+    ? 'Act as a Socratic mentor: Engage directly with what the user says. If they make an observation, ask a question, or clarify something, acknowledge it directly. Ask guiding questions, point out conceptual connections, offer intuitive analogies, and reference specific timestamps using format [MM:SS] (e.g., "[00:00]" or "[01:30]") so the student can jump to that part of the lecture. Do NOT repeat the exact same canned template on every message.'
+    : 'Provide a direct, rigorous, clear explanation answering the student prompt with precision, intuitive diagrams or formulas, and exact timestamp citations in format [MM:SS].'
 }
 Always cite relevant timestamps [MM:SS] so the student can click to review the lecture.`,
       });
@@ -299,72 +309,117 @@ Always cite relevant timestamps [MM:SS] so the student can click to review the l
 }
 
 /**
- * Intelligent heuristic fallback response generator grounded in the lecture artifact.
+ * Intelligent heuristic fallback response generator grounded in the lecture artifact and user query.
  */
 function generateContextualChatFallback(
   message: string,
   artifact: LectureArtifact,
   mode: 'socratic' | 'direct'
 ): string {
-  const lowerMsg = message.toLowerCase();
+  const lowerMsg = message.trim().toLowerCase();
+  const concepts = artifact.concepts || [];
+  const segments = artifact.transcript?.segments || [];
 
-  // Match best concept in artifact
-  const matchedConcept =
-    artifact.concepts.find(
-      (c) =>
-        lowerMsg.includes(c.title.toLowerCase()) ||
-        c.keyTakeaways.some((t) => lowerMsg.includes(t.toLowerCase().slice(0, 15))) ||
-        (c.formulaLatex && lowerMsg.includes('formula'))
-    ) || artifact.concepts[0];
+  // Match the most relevant concept or segment based on keyword overlap
+  let matchedConcept = concepts.find((c) =>
+    lowerMsg.includes(c.title.toLowerCase()) ||
+    c.keyTakeaways.some((t) => lowerMsg.includes(t.toLowerCase().slice(0, 15)))
+  );
+
+  // If no direct concept match, check words in the transcript segments
+  if (!matchedConcept && segments.length > 0) {
+    const words = lowerMsg.split(/\s+/).filter((w) => w.length > 3);
+    const matchingSeg = segments.find((seg) =>
+      words.some((w) => seg.text.toLowerCase().includes(w))
+    );
+    if (matchingSeg) {
+      matchedConcept = concepts.find(
+        (c) => Math.abs(c.timestampSeconds - matchingSeg.start) < 60
+      );
+    }
+  }
+
+  if (!matchedConcept) {
+    matchedConcept = concepts[0] || {
+      id: 'c-1',
+      title: artifact.title || 'Core Topic',
+      timestampSeconds: 0,
+      timestampFormatted: '00:00',
+      summary: artifact.overview || 'Fundamental principles',
+      explanation: artifact.overview || 'Core ideas of the lecture',
+      keyTakeaways: artifact.keyThemes || ['Core mechanism'],
+      importance: 'foundational' as const,
+      type: 'core' as const,
+      prerequisites: [],
+      related: [],
+    };
+  }
 
   const timestampTag = `[${matchedConcept.timestampFormatted}]`;
 
-  if (lowerMsg.includes('analogy') || lowerMsg.includes('like i\'m 5') || lowerMsg.includes('simple')) {
-    return `Let's break this down intuitively! Think of **${matchedConcept.title}** as a hiker on a foggy mountain ridge. 
+  // 1. Direct answer if user mentions text, notes, audio, voice, or format
+  if (lowerMsg.includes('text') || lowerMsg.includes('format') || lowerMsg.includes('transcript') || lowerMsg.includes('read') || lowerMsg.includes('audio') || lowerMsg.includes('voice')) {
+    return `Yes, absolutely! This lecture is built directly from your ingested text notes.
 
-Instead of seeing the whole landscape at once, you feel the incline directly under your feet. At ${timestampTag}, the professor explains that:
+You can press the **Play** button in the player above at ${timestampTag} and the built-in **AI Voice Narrator (TTS)** will read each line aloud while highlighting the synchronized transcript.
+
+Regarding **${matchedConcept.title}**:
 > "${matchedConcept.summary}"
 
 ${
   mode === 'socratic'
-    ? `Now imagine you take one step in any direction. How does your step along the steepest slope compare to a step where elevation doesn't change at all? What does that tell you about the angle between your path and the contour lines?`
-    : `Mathematically, this corresponds to:
-\`\`\`latex
-${matchedConcept.formulaLatex || matchedConcept.summary}
-\`\`\`
-Check out the golden breakdown at ${timestampTag} to hear the exact geometric insight.`
+    ? `From the text you reviewed, what do you think is the primary mechanism connecting this concept with the rest of the lecture?`
+    : `Key Takeaway: ${matchedConcept.keyTakeaways[0] || matchedConcept.summary}`
 }`;
   }
 
-  if (lowerMsg.includes('mistake') || lowerMsg.includes('trap') || lowerMsg.includes('quiz')) {
-    const diag = artifact.diagnosticQuestions[0];
-    const trapOpt = diag?.options.find((o) => !o.isCorrect);
+  // 2. Analogy / Intuition request
+  if (lowerMsg.includes('analogy') || lowerMsg.includes('simple') || lowerMsg.includes('like i\'m 5') || lowerMsg.includes('intuition')) {
+    return `Let's break down **${matchedConcept.title}** intuitively!
 
-    return `The most frequent cognitive trap in this topic centers on **${diag ? diag.question : matchedConcept.title}**.
+Think of it like a coordinated network: instead of acting in isolation, each part shares resources and signals dynamically. At ${timestampTag}, the lecture establishes that:
+> "${matchedConcept.summary}"
 
-Many students intuitively believe:
-> *"${trapOpt ? trapOpt.text : 'Rates can be computed without normalizing vectors'}"*
-
-**Why this fails:** ${trapOpt ? trapOpt.misconceptionExplanation : 'It conflates magnitude with pure directional rate of change.'}
-
-Review the resolution directly at ${diag ? `[${Math.floor(diag.timestampSeconds / 60)}:${(diag.timestampSeconds % 60).toString().padStart(2, '0')}]` : timestampTag} in the lecture!`;
-  }
-
-  if (mode === 'socratic') {
-    return `That's a pivotal question for understanding **${matchedConcept.title}** (${timestampTag}).
-
-Before answering, let's test your conceptual intuition:
-1. When the professor discusses *"${matchedConcept.summary}"* at ${timestampTag}, what physical or mathematical constraint is kept constant?
-2. If you look at the formula:
-\`\`\`latex
-${matchedConcept.formulaLatex || 'Key Relationship'}
+${
+  mode === 'socratic'
+    ? `If this resource transfer were interrupted, how would that affect the neighboring components down the chain? Take a look at the concept graph or jump to ${timestampTag}!`
+    : `**Resolution:** In ${artifact.title}, this dynamic balances the system:
 \`\`\`
-What would happen to the output if you reversed the direction of the vector or inverted the input?
-
-Take a moment to formulate what you think happens, or jump to ${timestampTag} in the player above!`;
+${matchedConcept.formulaLatex || matchedConcept.summary}
+\`\`\`
+Jump to ${timestampTag} in the synced player to explore further.`
+}`;
   }
 
-  return `In **${artifact.title}**, **${matchedConcept.title}** is formulated at ${timestampTag}:
+  // 3. Misconceptions and traps
+  if (lowerMsg.includes('mistake') || lowerMsg.includes('trap') || lowerMsg.includes('quiz') || lowerMsg.includes('common error')) {
+    const diag = artifact.diagnosticQuestions?.[0];
+    const trapOpt = diag?.options?.find((o) => !o.isCorrect);
+
+    return `A major misconception in this lecture relates to **${matchedConcept.title}** ${timestampTag}:
+${trapOpt ? `> Many students believe: *"${trapOpt.text}"*\n\n**Why this fails:** ${trapOpt.misconceptionExplanation}` : `> Assuming that properties remain uniform without considering external interactions.`}
+
+Review the resolution directly at ${diag ? `[${Math.floor(diag.timestampSeconds / 60)}:${(diag.timestampSeconds % 60).toString().padStart(2, '0')}]` : timestampTag} in the interactive player!`;
+  }
+
+  // 4. Socratic inquiry addressing user's actual prompt
+  if (mode === 'socratic') {
+    return `You mentioned: *"${message}"*.
+
+Let's connect this to **${matchedConcept.title}** at ${timestampTag}:
+> "${matchedConcept.summary}"
+
+1. How does your point relate to the core thesis of this section?
+2. If you inspect the relationship at ${timestampTag}:
+${matchedConcept.formulaLatex ? `\`\`\`latex\n${matchedConcept.formulaLatex}\n\`\`\`` : `*${matchedConcept.keyTakeaways[0] || 'Key principle'}*`}
+
+What would be the direct consequence if that premise did not hold? Jump to ${timestampTag} above to verify!`;
+  }
+
+  // 5. Direct mode response
+  return `Regarding your inquiry on *"${message}"*:
+
+In **${artifact.title}**, **${matchedConcept.title}** is detailed at ${timestampTag}:
 
 ${matchedConcept.explanation}
 
@@ -373,7 +428,7 @@ ${matchedConcept.keyTakeaways.map((t) => `- ${t}`).join('\n')}
 
 ${matchedConcept.formulaLatex ? `### Formulation:\n\`\`\`latex\n${matchedConcept.formulaLatex}\n\`\`\`` : ''}
 
-Jump to ${timestampTag} in the synced media player to review the professor's original derivation!`;
+Jump directly to ${timestampTag} in the synced player above to follow along!`;
 }
 
 /**
