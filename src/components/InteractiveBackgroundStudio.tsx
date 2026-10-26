@@ -804,6 +804,7 @@ export function AppDynamicBackground({
   className?: string;
   intensity?: number;
 }) {
+  const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<BackgroundTheme>(() => getStoredStudioTheme());
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -814,6 +815,10 @@ export function AppDynamicBackground({
     targetY: 0,
     radius: 180,
   });
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Listen for storage or studio theme change events
   useEffect(() => {
@@ -1139,7 +1144,11 @@ export function AppDynamicBackground({
       if (scrollTimeout) clearTimeout(scrollTimeout);
       cancelAnimationFrame(animationFrameId);
     };
-  }, [theme, intensity]);
+  }, [theme, intensity, mounted]);
+
+  if (!mounted) {
+    return null;
+  }
 
   return (
     <canvas
