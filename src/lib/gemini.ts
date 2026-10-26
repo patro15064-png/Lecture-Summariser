@@ -75,6 +75,9 @@ export async function withSelfHealingJSON<T>(
     try {
       const rawText = await generatorFn();
       const parsed = cleanAndParseJSON<T>(rawText);
+      if (parsed && typeof parsed === 'object' && 'mermaidGraph' in parsed && typeof (parsed as Record<string, unknown>).mermaidGraph === 'string') {
+        (parsed as Record<string, unknown>).mermaidGraph = sanitizeMermaidGraph((parsed as Record<string, unknown>).mermaidGraph as string);
+      }
       return parsed;
     } catch (err) {
       lastError = err;
