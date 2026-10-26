@@ -7,6 +7,10 @@ import { LectureSummary } from '@/components/LectureSummary';
 import { ConceptGraph } from '@/components/ConceptGraph';
 import { FlashcardDeck } from '@/components/FlashcardDeck';
 import { FormulaExplorer } from '@/components/FormulaExplorer';
+import { MisconceptionQuiz } from '@/components/MisconceptionQuiz';
+import { SocraticChat } from '@/components/SocraticChat';
+import { FeynmanCoach } from '@/components/FeynmanCoach';
+import { ExportModal } from '@/components/ExportModal';
 import { UploadModal } from '@/components/UploadModal';
 import { KeyVaultModal } from '@/components/KeyVaultModal';
 import { DEMO_LECTURES } from '@/data/demoLectures';
@@ -20,7 +24,10 @@ import {
   Layers, 
   MessageSquareCode, 
   ChevronDown,
-  GraduationCap
+  GraduationCap,
+  Download,
+  Compass,
+  Award
 } from 'lucide-react';
 
 export default function Home() {
@@ -30,9 +37,11 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
 
   const [activeTab, setActiveTab] = useState<'summary' | 'graph' | 'flashcards' | 'chat'>('summary');
+  const [chatSubTab, setChatSubTab] = useState<'socratic' | 'feynman'>('socratic');
 
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isVaultOpen, setIsVaultOpen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
   const [apiKey, setApiKey] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('gemini_vault_key') || '';
@@ -116,6 +125,17 @@ export default function Home() {
 
           {/* Right Action Buttons */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* Export Study Pack Modal Trigger */}
+            <button
+              type="button"
+              onClick={() => setIsExportOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all duration-200 bg-purple-950/40 hover:bg-purple-900/50 text-purple-200 hover:text-white border-purple-500/30 hover:border-purple-500/60 shadow-sm"
+              title="Export to Obsidian (.md) & Printable PDF"
+            >
+              <Download className="w-3.5 h-3.5 text-purple-400" />
+              <span className="hidden sm:inline">Export Pack</span>
+            </button>
+
             {/* Zero-Trust Key Vault Trigger */}
             <button
               type="button"
@@ -195,7 +215,7 @@ export default function Home() {
             }`}
           >
             <Layers className="w-4 h-4 text-pink-400" />
-            <span>Flashcards &amp; Formulas</span>
+            <span>Flashcards, Quizzes &amp; Formulas</span>
           </button>
 
           <button
@@ -209,7 +229,7 @@ export default function Home() {
           >
             <MessageSquareCode className="w-4 h-4 text-emerald-400" />
             <span>AI Socratic Chat &amp; Feynman</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono">Phase 4</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono">Active</span>
           </button>
         </div>
 
@@ -237,6 +257,10 @@ export default function Home() {
                 artifact={activeLecture}
                 onSeek={handleSeek}
               />
+              <MisconceptionQuiz
+                artifact={activeLecture}
+                onSeek={handleSeek}
+              />
               <FormulaExplorer
                 artifact={activeLecture}
                 onSeek={handleSeek}
@@ -245,14 +269,51 @@ export default function Home() {
           )}
 
           {activeTab === 'chat' && (
-            <div className="p-8 rounded-2xl border border-white/10 bg-slate-950/70 backdrop-blur-xl text-center space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 mx-auto flex items-center justify-center">
-                <MessageSquareCode className="w-6 h-6" />
+            <div className="space-y-6">
+              {/* In-Tab Sub Navigation Switcher */}
+              <div className="flex items-center justify-center sm:justify-start gap-2 p-1.5 rounded-2xl bg-slate-900/80 border border-white/10 w-fit">
+                <button
+                  type="button"
+                  onClick={() => setChatSubTab('socratic')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
+                    chatSubTab === 'socratic'
+                      ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/20'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Compass className="w-4 h-4" />
+                  <span>Socratic AI Tutor</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setChatSubTab('feynman')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
+                    chatSubTab === 'feynman'
+                      ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-600/20'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Award className="w-4 h-4" />
+                  <span>Richard Feynman Voice Coach</span>
+                </button>
               </div>
-              <h3 className="text-lg font-bold text-white">In-Lecture Socratic AI Tutor &amp; Feynman Voice Coach</h3>
-              <p className="text-xs sm:text-sm text-slate-400 max-w-lg mx-auto">
-                Scheduled for Phase 4! Ask any question about the lecture with timestamp citations, practice voice recall, and export to PDF.
-              </p>
+
+              {/* Subtab View */}
+              {chatSubTab === 'socratic' ? (
+                <SocraticChat
+                  artifact={activeLecture}
+                  currentTime={currentTime}
+                  onSeek={handleSeek}
+                  apiKey={apiKey}
+                />
+              ) : (
+                <FeynmanCoach
+                  artifact={activeLecture}
+                  onSeek={handleSeek}
+                  apiKey={apiKey}
+                />
+              )}
             </div>
           )}
         </div>
@@ -271,6 +332,13 @@ export default function Home() {
         onClose={() => setIsVaultOpen(false)}
         onKeySaved={setApiKey}
       />
+
+      <ExportModal
+        isOpen={isExportOpen}
+        onClose={() => setIsExportOpen(false)}
+        artifact={activeLecture}
+      />
     </div>
   );
 }
+
