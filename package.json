@@ -11,9 +11,11 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
+    "@tailwindcss/postcss": "^4.3.3",
     "animejs": "3.2.2",
     "clsx": "^2.1.1",
     "hermes-parser": "^0.37.0",
+    "lightningcss-win32-x64-msvc": "^1.33.0",
     "lucide-react": "^1.16.0",
     "mermaid": "^11.4.1",
     "next": "^16.4.3",

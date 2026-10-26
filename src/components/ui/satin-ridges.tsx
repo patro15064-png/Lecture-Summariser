@@ -140,6 +140,15 @@ export default function SatinRidges({
     <canvas
       ref={canvasRef}
       aria-hidden="true"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100vw',
+        height: '100vh',
+        zIndex: -1,
+        pointerEvents: 'none',
+      }}
       className={`fixed inset-0 pointer-events-none -z-10 h-full w-full ${className}`}
     />
   );
