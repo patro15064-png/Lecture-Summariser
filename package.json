@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
-    "animejs": "3.2.2",
+    "animejs": "4.5.0",
     "clsx": "^2.1.1",
     "hermes-parser": "^0.37.0",
     "lucide-react": "^1.16.0",
@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
-    "@types/animejs": "^3.1.12",
+    "@types/animejs": "^4.0.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
