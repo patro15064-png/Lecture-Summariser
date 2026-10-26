@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   Play, 
   Pause, 
@@ -15,7 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   AlertTriangle,
-  LocateFixed
+  LocateFixed,
+  Volume1
 } from 'lucide-react';
 import { LectureArtifact } from '@/types/lecture';
 import { formatTime } from '@/lib/transcriptParser';
@@ -41,18 +42,53 @@ export function MediaPlayer({
   const [isTranscriptOpen, setIsTranscriptOpen] = useState(true);
   const [followAudio, setFollowAudio] = useState(true);
   const [realMediaDuration, setRealMediaDuration] = useState<number | null>(null);
+  const [isSpeakingNow, setIsSpeakingNow] = useState(false);
 
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const transcriptListRef = useRef<HTMLDivElement | null>(null);
   const activeSegmentRef = useRef<HTMLDivElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
-  const lastTickRef = useRef<number>(0);
 
+  // Synchronized refs so speech synthesis callbacks and loops have current state without triggering re-subscriptions
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
+
+  const currentTimeRef = useRef(currentTime);
+  currentTimeRef.current = currentTime;
+
+  const playbackRateRef = useRef(playbackRate);
+  playbackRateRef.current = playbackRate;
+
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
+
+  const isMutedRef = useRef(isMuted);
+  isMutedRef.current = isMuted;
+
+  const currentSpeakingIdxRef = useRef<number>(-1);
+
+  // Effective transcript segments with fallback for raw explanation text
   const segments = artifact.transcript?.segments || [];
-  const hasTimestamps = artifact.transcript?.hasTimestamps ?? true;
-  const totalSeconds = realMediaDuration || artifact.durationSeconds || (segments.length > 0 ? segments[segments.length - 1].end : 600);
+  const effectiveSegments = useMemo(() => {
+    if (segments.length > 0) return segments;
+    const fallbackText = (artifact.overview || artifact.title || 'Lecture explanation').trim();
+    return [
+      {
+        id: 'seg-fallback-1',
+        start: 0,
+        end: Math.max(15, Math.round(fallbackText.split(/\s+/).length / 2.5)),
+        text: fallbackText,
+      },
+    ];
+  }, [segments, artifact.overview, artifact.title]);
 
-  // Sync real HTMLMediaElement if available
+  const hasTimestamps = artifact.transcript?.hasTimestamps ?? true;
+  const totalSeconds =
+    realMediaDuration ||
+    artifact.durationSeconds ||
+    (effectiveSegments.length > 0 ? effectiveSegments[effectiveSegments.length - 1].end : 600);
+
+  // Sync real HTMLMediaElement if media URL is attached (video or audio file)
   useEffect(() => {
     const media = mediaRef.current;
     if (!media) return;
@@ -82,86 +118,179 @@ export function MediaPlayer({
     media.volume = volume;
   }, [playbackRate, isMuted, volume]);
 
-  // AI Voice Synthesis for text/transcript lectures without media files
-  const speakingSegmentIndexRef = useRef<number>(-1);
-
-  // Fallback timer and Web Speech narration when media file is not attached (transcript-only / text mode)
-  useEffect(() => {
-    if (artifact.mediaUrl && mediaRef.current) {
-      return; // Real media element drives time
+  // Stop Web Speech Synthesis safely
+  const stopSpeech = useCallback(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
     }
+    currentSpeakingIdxRef.current = -1;
+    setIsSpeakingNow(false);
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+  }, []);
 
-    if (isPlaying) {
-      // If browser supports SpeechSynthesis, speak the current segment
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window && !isMuted) {
-        // Find segment index corresponding to currentTime
-        const currentSegIdx = segments.findIndex(
-          (seg) => currentTime >= seg.start && currentTime <= seg.end
-        );
-        const targetIdx = currentSegIdx >= 0 ? currentSegIdx : 0;
-
-        if (speakingSegmentIndexRef.current !== targetIdx && segments[targetIdx]) {
-          window.speechSynthesis.cancel();
-          const segText = segments[targetIdx].text;
-          const utterance = new SpeechSynthesisUtterance(segText);
-          utterance.rate = Math.max(0.75, Math.min(2, playbackRate));
-          utterance.volume = volume;
-          speakingSegmentIndexRef.current = targetIdx;
-
-          utterance.onend = () => {
-            speakingSegmentIndexRef.current = -1;
-          };
-          utterance.onerror = () => {
-            speakingSegmentIndexRef.current = -1;
-          };
-
-          window.speechSynthesis.speak(utterance);
-        }
+  // Speak a specific segment by index with full audio output and smooth progress tracking
+  const speakSegmentIndex = useCallback(
+    (idx: number) => {
+      if (artifact.mediaUrl || typeof window === 'undefined' || !('speechSynthesis' in window)) {
+        return;
       }
 
-      lastTickRef.current = Date.now();
-      const updateLoop = () => {
-        const now = Date.now();
-        const deltaSec = ((now - lastTickRef.current) / 1000) * playbackRate;
-        lastTickRef.current = now;
+      if (idx < 0 || idx >= effectiveSegments.length) {
+        stopSpeech();
+        onPlayStateChange(false);
+        onTimeUpdate(totalSeconds);
+        return;
+      }
 
-        const nextTime = Math.min(totalSeconds, currentTime + deltaSec);
-        onTimeUpdate(nextTime);
+      if (isMutedRef.current) {
+        return;
+      }
 
-        if (nextTime >= totalSeconds) {
-          if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-            window.speechSynthesis.cancel();
+      // Cancel previous utterance
+      window.speechSynthesis.cancel();
+
+      const seg = effectiveSegments[idx];
+      const utterance = new SpeechSynthesisUtterance(seg.text);
+      utterance.lang = 'en-US';
+      utterance.rate = Math.max(0.75, Math.min(2, playbackRateRef.current));
+      utterance.volume = isMutedRef.current ? 0 : Math.max(0.1, volumeRef.current);
+      utterance.pitch = 1.0;
+
+      // Select natural English voice if available in browser
+      try {
+        const voices = window.speechSynthesis.getVoices();
+        const preferredVoice =
+          voices.find(
+            (v) =>
+              v.lang.startsWith('en') &&
+              (v.name.includes('Natural') ||
+                v.name.includes('Google') ||
+                v.name.includes('David') ||
+                v.name.includes('Samantha') ||
+                v.name.includes('Zira') ||
+                v.name.includes('Jenny') ||
+                v.name.includes('Guy'))
+          ) || voices.find((v) => v.lang.startsWith('en'));
+        if (preferredVoice) {
+          utterance.voice = preferredVoice;
+        }
+      } catch {}
+
+      currentSpeakingIdxRef.current = idx;
+
+      utterance.onstart = () => {
+        setIsSpeakingNow(true);
+        onTimeUpdate(seg.start);
+
+        // Animate scrubber progress continuously during this segment's speech
+        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+        const startTime = seg.start;
+        const startWallClock = Date.now();
+
+        const loop = () => {
+          if (!isPlayingRef.current || currentSpeakingIdxRef.current !== idx) return;
+          const elapsedSec = ((Date.now() - startWallClock) / 1000) * playbackRateRef.current;
+          const nextT = Math.min(seg.end, startTime + elapsedSec);
+          onTimeUpdate(nextT);
+          if (nextT < seg.end) {
+            animationFrameRef.current = requestAnimationFrame(loop);
           }
-          speakingSegmentIndexRef.current = -1;
-          onPlayStateChange(false);
-        } else {
-          animationFrameRef.current = requestAnimationFrame(updateLoop);
+        };
+        animationFrameRef.current = requestAnimationFrame(loop);
+      };
+
+      utterance.onend = () => {
+        setIsSpeakingNow(false);
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
+
+        // If still in playing state, advance seamlessly to next segment
+        if (isPlayingRef.current) {
+          if (idx + 1 < effectiveSegments.length) {
+            speakSegmentIndex(idx + 1);
+          } else {
+            currentSpeakingIdxRef.current = -1;
+            onPlayStateChange(false);
+            onTimeUpdate(totalSeconds);
+          }
         }
       };
-      animationFrameRef.current = requestAnimationFrame(updateLoop);
-    } else {
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-      speakingSegmentIndexRef.current = -1;
-    }
 
-    return () => {
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-    };
-  }, [isPlaying, currentTime, playbackRate, isMuted, volume, totalSeconds, artifact.mediaUrl, segments, onTimeUpdate, onPlayStateChange]);
+      utterance.onerror = (event) => {
+        if (event.error !== 'canceled' && event.error !== 'interrupted') {
+          setIsSpeakingNow(false);
+          if (isPlayingRef.current && idx + 1 < effectiveSegments.length) {
+            speakSegmentIndex(idx + 1);
+          }
+        }
+      };
 
-  // Handle mute change for speech synthesis
+      window.speechSynthesis.speak(utterance);
+      // Nudge browser in case speech was paused internally
+      window.speechSynthesis.resume();
+    },
+    [artifact.mediaUrl, effectiveSegments, totalSeconds, onPlayStateChange, onTimeUpdate, stopSpeech]
+  );
+
+  // Speak starting from a specific second timestamp
+  const speakFromTime = useCallback(
+    (timeSec: number) => {
+      let targetIdx = effectiveSegments.findIndex(
+        (seg) => timeSec >= seg.start && timeSec < seg.end
+      );
+      if (targetIdx === -1) {
+        targetIdx = effectiveSegments.findIndex((seg) => seg.end > timeSec);
+        if (targetIdx === -1) targetIdx = 0;
+      }
+      speakSegmentIndex(targetIdx);
+    },
+    [effectiveSegments, speakSegmentIndex]
+  );
+
+  // React to isPlaying changes without re-triggering speech when time advances
   useEffect(() => {
-    if (!artifact.mediaUrl && isMuted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      speakingSegmentIndexRef.current = -1;
+    if (artifact.mediaUrl) return; // Real media tag controls sound
+
+    if (isPlaying) {
+      speakFromTime(currentTimeRef.current);
+    } else {
+      stopSpeech();
     }
-  }, [isMuted, artifact.mediaUrl]);
+  }, [isPlaying, artifact.mediaUrl, speakFromTime, stopSpeech]);
+
+  // Handle mute changes
+  useEffect(() => {
+    if (artifact.mediaUrl) return;
+    if (isMuted) {
+      stopSpeech();
+    } else if (isPlaying) {
+      speakFromTime(currentTimeRef.current);
+    }
+  }, [isMuted, isPlaying, artifact.mediaUrl, speakFromTime, stopSpeech]);
+
+  // Keep-alive workaround for Chromium speech pause bug on long sentences
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const interval = setInterval(() => {
+      if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
+      }
+    }, 6000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Cleanup speech on unmount
+  useEffect(() => {
+    return () => {
+      stopSpeech();
+    };
+  }, [stopSpeech]);
 
   // Auto-scroll transcript to active segment if followAudio is enabled
   useEffect(() => {
@@ -194,6 +323,8 @@ export function MediaPlayer({
     onTimeUpdate(newSec);
     if (mediaRef.current) {
       mediaRef.current.currentTime = newSec;
+    } else if (isPlaying) {
+      speakFromTime(newSec);
     }
   };
 
@@ -202,6 +333,8 @@ export function MediaPlayer({
     onTimeUpdate(nextTime);
     if (mediaRef.current) {
       mediaRef.current.currentTime = nextTime;
+    } else if (isPlaying) {
+      speakFromTime(nextTime);
     }
   };
 
@@ -210,11 +343,30 @@ export function MediaPlayer({
     const currentIndex = rates.indexOf(playbackRate);
     const nextRate = rates[(currentIndex + 1) % rates.length];
     setPlaybackRate(nextRate);
+    if (!artifact.mediaUrl && isPlaying && currentSpeakingIdxRef.current >= 0) {
+      speakSegmentIndex(currentSpeakingIdxRef.current);
+    }
   };
 
-  const activeSegment = segments.find(
+  const handleTogglePlay = () => {
+    const nextPlay = !isPlaying;
+    onPlayStateChange(nextPlay);
+    // User click gesture directly triggers synthesis to bypass any browser autoplay restrictions
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.resume();
+    }
+    if (!artifact.mediaUrl) {
+      if (nextPlay) {
+        speakFromTime(currentTime);
+      } else {
+        stopSpeech();
+      }
+    }
+  };
+
+  const activeSegment = effectiveSegments.find(
     (seg) => currentTime >= seg.start && currentTime <= seg.end
-  );
+  ) || effectiveSegments[0];
 
   const progressPercent = Math.min(100, (currentTime / (totalSeconds || 1)) * 100);
 
@@ -264,8 +416,23 @@ export function MediaPlayer({
               <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isPlaying ? 'bg-emerald-500' : 'bg-slate-500'}`} />
             </span>
             <span className="text-xs font-semibold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5 shrink-0">
-              <Radio className="w-3.5 h-3.5" />
-              {artifact.mediaUrl ? 'Synchronized Media' : 'AI Voice Narrator (TTS)'}
+              {artifact.mediaUrl ? (
+                <>
+                  <Radio className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Synchronized Media</span>
+                </>
+              ) : (
+                <>
+                  {isSpeakingNow ? (
+                    <Volume2 className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                  ) : (
+                    <Volume1 className="w-3.5 h-3.5 text-purple-400" />
+                  )}
+                  <span className={isSpeakingNow ? 'text-emerald-400 font-bold' : ''}>
+                    {isSpeakingNow ? 'AI Speaking Out Loud' : isPlaying ? 'AI Voice Active' : 'AI Voice Narrator'}
+                  </span>
+                </>
+              )}
             </span>
             <span className="text-xs text-slate-300 font-medium truncate border-l border-white/10 pl-2.5">
               {artifact.title}
@@ -332,10 +499,10 @@ export function MediaPlayer({
 
             <button
               type="button"
-              onClick={() => onPlayStateChange(!isPlaying)}
+              onClick={handleTogglePlay}
               className="p-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white rounded-xl shadow-lg shadow-indigo-500/25 transition-all transform hover:scale-105 active:scale-95"
-              title={isPlaying ? 'Pause' : 'Play'}
-              aria-label={isPlaying ? 'Pause playback' : 'Start playback'}
+              title={isPlaying ? 'Pause' : 'Play & Read Out Loud'}
+              aria-label={isPlaying ? 'Pause playback' : 'Play and read aloud'}
             >
               {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
             </button>
@@ -456,8 +623,9 @@ export function MediaPlayer({
             ref={transcriptListRef}
             className="max-h-56 sm:max-h-64 overflow-y-auto space-y-1.5 pr-2 font-sans text-xs scroll-smooth"
           >
-            {segments.map((seg) => {
+            {effectiveSegments.map((seg, idx) => {
               const isActive = currentTime >= seg.start && currentTime <= seg.end;
+              const isCurrentlyBeingSpoken = isSpeakingNow && currentSpeakingIdxRef.current === idx;
 
               return (
                 <div
@@ -465,22 +633,49 @@ export function MediaPlayer({
                   ref={isActive ? activeSegmentRef : null}
                   onClick={() => {
                     onTimeUpdate(seg.start);
-                    if (mediaRef.current) mediaRef.current.currentTime = seg.start;
+                    if (mediaRef.current) {
+                      mediaRef.current.currentTime = seg.start;
+                    } else if (isPlaying) {
+                      speakSegmentIndex(idx);
+                    }
                   }}
-                  className={`group p-2.5 rounded-xl cursor-pointer transition-all duration-150 flex items-start gap-3 ${
+                  className={`group p-2.5 rounded-xl cursor-pointer transition-all duration-150 flex items-start justify-between gap-3 ${
                     isActive
                       ? 'bg-indigo-600/25 border border-indigo-500/40 text-white shadow-md shadow-indigo-500/10'
                       : 'hover:bg-slate-900/80 text-slate-400 hover:text-slate-200 border border-transparent'
                   }`}
                 >
-                  <span className={`font-mono text-[11px] shrink-0 px-2 py-0.5 rounded-md ${
-                    isActive ? 'bg-indigo-500 text-white font-bold' : 'bg-slate-900 text-slate-400 group-hover:text-indigo-300'
-                  }`}>
-                    {formatTime(seg.start)}
-                  </span>
-                  <p className="leading-relaxed font-light">
-                    {seg.text}
-                  </p>
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <span className={`font-mono text-[11px] shrink-0 px-2 py-0.5 rounded-md ${
+                      isActive ? 'bg-indigo-500 text-white font-bold' : 'bg-slate-900 text-slate-400 group-hover:text-indigo-300'
+                    }`}>
+                      {formatTime(seg.start)}
+                    </span>
+                    <p className="leading-relaxed font-light">
+                      {seg.text}
+                    </p>
+                  </div>
+
+                  {!artifact.mediaUrl && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTimeUpdate(seg.start);
+                        if (!isPlaying) onPlayStateChange(true);
+                        speakSegmentIndex(idx);
+                      }}
+                      className={`p-1.5 rounded-lg transition-colors shrink-0 ${
+                        isCurrentlyBeingSpoken
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse'
+                          : 'opacity-0 group-hover:opacity-100 hover:bg-white/10 text-slate-400 hover:text-white'
+                      }`}
+                      title="Read this sentence aloud"
+                      aria-label={`Read aloud: ${seg.text.slice(0, 30)}`}
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               );
             })}

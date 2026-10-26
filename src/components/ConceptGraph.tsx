@@ -10,7 +10,9 @@ import {
   ZoomIn, 
   ZoomOut, 
   Maximize2, 
-  ShieldCheck 
+  ShieldCheck,
+  Volume2,
+  VolumeX 
 } from 'lucide-react';
 import { LectureArtifact, ConceptNode, ConceptType } from '@/types/lecture';
 import { MathView } from './MathView';
@@ -27,6 +29,7 @@ export function ConceptGraph({ artifact, currentTime, onSeek }: ConceptGraphProp
   const [selectedConceptId, setSelectedConceptId] = useState<string>(() => {
     return artifact.concepts?.[0]?.id || '';
   });
+  const [speakingExplanation, setSpeakingExplanation] = useState(false);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -437,11 +440,36 @@ export function ConceptGraph({ artifact, currentTime, onSeek }: ConceptGraphProp
                 </div>
               )}
 
-              {/* Pedagogical Explanation */}
+              {/* Pedagogical Explanation with AI Voice Readout */}
               <div className="space-y-1.5">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                  <Info className="w-3.5 h-3.5 text-purple-400" /> Pedagogical Explanation:
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                    <Info className="w-3.5 h-3.5 text-purple-400" /> Pedagogical Explanation:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+                      if (speakingExplanation) {
+                        window.speechSynthesis.cancel();
+                        setSpeakingExplanation(false);
+                      } else {
+                        window.speechSynthesis.cancel();
+                        const utterance = new SpeechSynthesisUtterance(selectedConcept.explanation);
+                        utterance.rate = 1.0;
+                        utterance.onend = () => setSpeakingExplanation(false);
+                        utterance.onerror = () => setSpeakingExplanation(false);
+                        setSpeakingExplanation(true);
+                        window.speechSynthesis.speak(utterance);
+                      }
+                    }}
+                    className="flex items-center gap-1 text-[11px] font-medium text-purple-400 hover:text-purple-300 transition-colors"
+                    title="Read explanation aloud"
+                  >
+                    {speakingExplanation ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                    <span>{speakingExplanation ? 'Stop Voice' : 'Listen'}</span>
+                  </button>
+                </div>
                 <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-light">
                   {selectedConcept.explanation}
                 </p>

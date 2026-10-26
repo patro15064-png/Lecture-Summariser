@@ -8,7 +8,9 @@ import {
   BookOpen, 
   Clock, 
   CheckCircle2,
-  Atom
+  Atom,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { LectureArtifact, ConceptNode } from '@/types/lecture';
 import { MathView } from './MathView';
@@ -25,6 +27,7 @@ export function FormulaExplorer({ artifact, onSeek }: FormulaExplorerProps) {
   const [selectedId, setSelectedId] = useState<string>(
     formulaConcepts.length > 0 ? formulaConcepts[0].id : ''
   );
+  const [speakingExplanation, setSpeakingExplanation] = useState(false);
 
   if (formulaConcepts.length === 0) {
     return (
@@ -136,9 +139,34 @@ export function FormulaExplorer({ artifact, onSeek }: FormulaExplorerProps) {
 
           {/* Conceptual Intuition */}
           <div className="space-y-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <BookOpen className="w-3.5 h-3.5 text-purple-400" /> Deep Conceptual Rationale:
-            </span>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <BookOpen className="w-3.5 h-3.5 text-purple-400" /> Deep Conceptual Rationale:
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+                  if (speakingExplanation) {
+                    window.speechSynthesis.cancel();
+                    setSpeakingExplanation(false);
+                  } else {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(activeConcept.explanation);
+                    utterance.rate = 1.0;
+                    utterance.onend = () => setSpeakingExplanation(false);
+                    utterance.onerror = () => setSpeakingExplanation(false);
+                    setSpeakingExplanation(true);
+                    window.speechSynthesis.speak(utterance);
+                  }
+                }}
+                className="flex items-center gap-1 text-[11px] font-medium text-purple-400 hover:text-purple-300 transition-colors"
+                title="Read formula explanation aloud"
+              >
+                {speakingExplanation ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                <span>{speakingExplanation ? 'Stop Voice' : 'Listen'}</span>
+              </button>
+            </div>
             <p className="text-sm text-slate-200 leading-relaxed font-light">
               {activeConcept.explanation}
             </p>

@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   BookOpen, 
   Sparkles, 
@@ -10,7 +10,9 @@ import {
   Clock, 
   Play, 
   Quote, 
-  Flame
+  Flame,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { LectureArtifact, GoldenAudioSnippet } from '@/types/lecture';
 
@@ -21,6 +23,8 @@ interface LectureSummaryProps {
 }
 
 export function LectureSummary({ artifact, currentTime, onSeek }: LectureSummaryProps) {
+  const [speakingOverview, setSpeakingOverview] = useState(false);
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Hero Overview Card */}
@@ -54,8 +58,33 @@ export function LectureSummary({ artifact, currentTime, onSeek }: LectureSummary
 
           {/* Executive Overview */}
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-indigo-400">
-              <BookOpen className="w-4 h-4" /> Executive Synthesis
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-indigo-400">
+                <BookOpen className="w-4 h-4" /> Executive Synthesis
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+                  if (speakingOverview) {
+                    window.speechSynthesis.cancel();
+                    setSpeakingOverview(false);
+                  } else {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(artifact.overview);
+                    utterance.rate = 1.0;
+                    utterance.onend = () => setSpeakingOverview(false);
+                    utterance.onerror = () => setSpeakingOverview(false);
+                    setSpeakingOverview(true);
+                    window.speechSynthesis.speak(utterance);
+                  }
+                }}
+                className="flex items-center gap-1 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
+                title="Read executive synthesis aloud"
+              >
+                {speakingOverview ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                <span>{speakingOverview ? 'Stop Voice' : 'Listen to Synthesis'}</span>
+              </button>
             </div>
             <p className="text-sm sm:text-base text-slate-300 leading-relaxed font-light">
               {artifact.overview}
