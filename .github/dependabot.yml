@@ -10,6 +10,11 @@ updates:
     labels:
       - "dependencies"
       - "security"
+    ignore:
+      - dependency-name: "animejs"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/animejs"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

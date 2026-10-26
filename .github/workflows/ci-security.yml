@@ -54,8 +54,11 @@ jobs:
       - name: Install Dependencies
         run: npm ci || npm install
 
+      - name: ESLint Code Quality Verification
+        run: npm run lint
+
       - name: TypeScript Strict Static Analysis
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Production Next.js Build
         run: npm run build
