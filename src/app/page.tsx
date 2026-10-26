@@ -4,6 +4,9 @@ import React, { useState, useEffect } from 'react';
 import SatinRidges from '@/components/ui/satin-ridges';
 import { MediaPlayer } from '@/components/MediaPlayer';
 import { LectureSummary } from '@/components/LectureSummary';
+import { ConceptGraph } from '@/components/ConceptGraph';
+import { FlashcardDeck } from '@/components/FlashcardDeck';
+import { FormulaExplorer } from '@/components/FormulaExplorer';
 import { UploadModal } from '@/components/UploadModal';
 import { KeyVaultModal } from '@/components/KeyVaultModal';
 import { DEMO_LECTURES } from '@/data/demoLectures';
@@ -180,7 +183,6 @@ export default function Home() {
           >
             <Network className="w-4 h-4 text-purple-400" />
             <span>Prerequisite Concept Graph</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono">Phase 3</span>
           </button>
 
           <button
@@ -193,8 +195,7 @@ export default function Home() {
             }`}
           >
             <Layers className="w-4 h-4 text-pink-400" />
-            <span>Active-Recall Flashcards</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-pink-500/20 text-pink-300 font-mono">Phase 3</span>
+            <span>Flashcards &amp; Formulas</span>
           </button>
 
           <button
@@ -223,26 +224,23 @@ export default function Home() {
           )}
 
           {activeTab === 'graph' && (
-            <div className="p-8 rounded-2xl border border-white/10 bg-slate-950/70 backdrop-blur-xl text-center space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-purple-400 mx-auto flex items-center justify-center">
-                <Network className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-bold text-white">Interactive Prerequisite Graph</h3>
-              <p className="text-xs sm:text-sm text-slate-400 max-w-lg mx-auto">
-                Next up in Phase 3! Dynamically renders non-linear Mermaid topic dependencies and syncs clicks directly to the media player timestamps.
-              </p>
-            </div>
+            <ConceptGraph
+              artifact={activeLecture}
+              currentTime={currentTime}
+              onSeek={handleSeek}
+            />
           )}
 
           {activeTab === 'flashcards' && (
-            <div className="p-8 rounded-2xl border border-white/10 bg-slate-950/70 backdrop-blur-xl text-center space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-pink-500/10 border border-pink-500/20 text-pink-400 mx-auto flex items-center justify-center">
-                <Layers className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-bold text-white">3D Active-Recall Flashcard Deck</h3>
-              <p className="text-xs sm:text-sm text-slate-400 max-w-lg mx-auto">
-                Next up in Phase 3! Features 3D card flips, spaced-repetition confidence ratings, and direct lecture review buttons.
-              </p>
+            <div className="space-y-10">
+              <FlashcardDeck
+                artifact={activeLecture}
+                onSeek={handleSeek}
+              />
+              <FormulaExplorer
+                artifact={activeLecture}
+                onSeek={handleSeek}
+              />
             </div>
           )}
 
