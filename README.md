@@ -85,9 +85,9 @@ flowchart LR
 | :---: | :--- | :---: | :--- |
 | **Phase 0** | **Scaffolding, Enterprise Repo Governance, CI/CD & Satin Ridges** | ✅ Completed & Verified | Next.js App Router, TypeScript Strict, Dependabot, Security Policy, MIT License |
 | **Phase 1** | **Multimodal AI Engine, Parser & University Demo Datasets** | ✅ Completed & Verified | `demoLectures.ts`, `withSelfHealingJSON`, Calculus & Digital Logic Datasets |
-| **Phase 2** | **"Satin Ridges" Theme Layer, Anime.js & Synced Media Workspace** | ⏳ Pending | 60fps Satin Canvas Shader, Glassmorphism, Anime.js Stagger Choreography |
-| **Phase 3** | **Interactive Prerequisite Concept Graph & Smart Formula Explorer** | ⏳ Pending | Self-Healing Mermaid Graph, Bi-directional Timeline Sync, LaTeX Math Blocks |
-| **Phase 4** | **Diagnostic Quiz, Feynman Active-Recall Coach & Obsidian Export** | ⏳ Pending | Anime.js Quiz Physics, Web Speech Voice Evaluator, 1-Click `.md` Export |
+| **Phase 2** | **"Satin Ridges" Theme, Universal Upload & Synced Media Workspace** | ✅ Completed & Verified | 60fps Satin Shader, Universal Upload (MP4/MP3/PDF/Links), Key Vault Modal, Synced Media Player |
+| **Phase 3** | **Interactive Concept Graph, 3D Flashcards & Formula Explorer** | ⏳ Pending | Self-Healing Mermaid Graph, Bi-directional Timeline Sync, 3D Active-Recall Flashcards, LaTeX Explorer |
+| **Phase 4** | **In-Lecture AI Chat, Feynman Coach & Multi-Format PDF Export** | ⏳ Pending | Context-Aware Socratic AI Chatbot, Speech Voice Evaluator, 1-Click Printable PDF + Obsidian Vault (.md) |
 
 ---
 
