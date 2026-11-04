@@ -375,3 +375,4 @@ export async function performVisualSensing(fileOrBlob: File | Blob): Promise<Vis
     img.src = url;
   });
 }
+
