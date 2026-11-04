@@ -29,10 +29,11 @@ import {
 } from '@/lib/orchestrator';
 import { loadUserApiSettings } from '@/lib/providerSettings';
 import { 
-  analyzePhotoWithVision, 
+  analyzePhotoWithSensing,
   generateSpokenAudioLecture, 
   extractVideoFrames 
 } from '@/lib/multimodalAnalyzer';
+import { isMeaninglessFilename } from '@/lib/visualSensor';
 import { extractAnyLearningMaterial } from '@/lib/documentExtractors';
 import { CameraCaptureModal } from './CameraCaptureModal';
 
@@ -89,7 +90,7 @@ export function UploadModal({
     setSelectedImage(file);
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setImagePreviewUrl(URL.createObjectURL(file));
-    if (!title) {
+    if (!title && !isMeaninglessFilename(file.name)) {
       const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
       setTitle(cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
     }
@@ -98,7 +99,7 @@ export function UploadModal({
 
   const handleMediaSelect = (file: File) => {
     setMediaFile(file);
-    if (!title) {
+    if (!title && !isMeaninglessFilename(file.name)) {
       const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
       setTitle(cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
     }
@@ -107,7 +108,7 @@ export function UploadModal({
 
   const handleDocumentSelect = (file: File) => {
     setDocumentFile(file);
-    if (!title) {
+    if (!title && !isMeaninglessFilename(file.name)) {
       const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
       setTitle(cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
     }
@@ -116,7 +117,7 @@ export function UploadModal({
 
   const handleTranscriptSelect = (file: File) => {
     setTranscriptFile(file);
-    if (!title && !mediaFile) {
+    if (!title && !mediaFile && !isMeaninglessFilename(file.name)) {
       const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
       setTitle(cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
     }
@@ -162,18 +163,18 @@ export function UploadModal({
       let mediaUrl: string | undefined;
       let audioBlob: Blob | undefined;
       let mediaType: 'audio' | 'video' | 'transcript_only' = 'transcript_only';
-      const finalTitle = title.trim() || selectedImage?.name || mediaFile?.name || documentFile?.name || 'Lecture Synthesis';
+      let finalTitle = title.trim();
 
       // -------------------------------------------------------------
       // PATH 1: PHOTO / IMAGE INPUT (HANDWRITING, WHITEBOARDS, NOTES)
       // -------------------------------------------------------------
       if (ingestMode === 'photo' && selectedImage) {
-        setProgressStage('Analyzing photo & handwriting with Multimodal Vision...');
+        setProgressStage('Inspecting image pixels & visual content with Visual Sensor...');
         setProgressPercent(15);
         cancelToken.check();
 
-        // 1. Send image to multimodal vision LLM (Gemini 2.0 Flash or OpenAI Vision)
-        const extractedVisionNotes = await analyzePhotoWithVision({
+        // 1. Analyze image directly from pixels using visual sensing & multimodal vision (never relies on file name)
+        const visionResult = await analyzePhotoWithSensing({
           imageFileOrBlob: selectedImage,
           filename: selectedImage.name,
           settings,
@@ -183,13 +184,17 @@ export function UploadModal({
           },
         });
 
+        if (!finalTitle || isMeaninglessFilename(finalTitle)) {
+          finalTitle = visionResult.title;
+        }
+
         cancelToken.check();
         setProgressPercent(35);
         setProgressStage('Generating spoken pedagogical audio explanation...');
 
         // 2. Synthesize spoken audio lecture explanation with timestamps
         transcript = await generateSpokenAudioLecture({
-          rawContent: extractedVisionNotes,
+          rawContent: visionResult.notes,
           title: finalTitle,
           settings,
           onProgress: (stage) => {
@@ -261,26 +266,28 @@ export function UploadModal({
             const frames = await extractVideoFrames(mediaFile, 3);
 
             if (frames.length > 0) {
-              setProgressStage('Analyzing video frames with Multimodal Vision...');
+              setProgressStage('Analyzing video frames with Visual Sensor & Vision...');
               const visionParts: string[] = [];
               for (let i = 0; i < frames.length; i++) {
                 cancelToken.check();
                 // Convert frame dataURL to blob
                 const res = await fetch(frames[i]);
                 const frameBlob = await res.blob();
-                const notes = await analyzePhotoWithVision({
+                const visionResult = await analyzePhotoWithSensing({
                   imageFileOrBlob: frameBlob,
-                  filename: `frame-${i + 1}.jpg`,
                   settings,
                   onProgress: (msg) => setProgressStage(msg),
                 });
-                visionParts.push(notes);
+                if ((!finalTitle || isMeaninglessFilename(finalTitle)) && visionResult.title) {
+                  finalTitle = visionResult.title;
+                }
+                visionParts.push(visionResult.notes);
               }
 
               const combinedNotes = visionParts.join('\n\n');
               transcript = await generateSpokenAudioLecture({
                 rawContent: combinedNotes,
-                title: finalTitle,
+                title: finalTitle || 'Video Visual Presentation Analysis',
                 settings,
                 onProgress: (msg) => setProgressStage(msg),
               });
@@ -357,6 +364,10 @@ export function UploadModal({
       }
 
       cancelToken.check();
+
+      if (!finalTitle || isMeaninglessFilename(finalTitle)) {
+        finalTitle = 'Visual Learning Synthesis';
+      }
 
       // -------------------------------------------------------------
       // RUN GROUNDED MULTI-AGENT SYNTHESIS PIPELINE
@@ -572,7 +583,7 @@ export function UploadModal({
                         <div className="text-left">
                           <p className="text-sm font-semibold text-white flex items-center gap-1.5">
                             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                            {selectedImage.name}
+                            {isMeaninglessFilename(selectedImage.name) ? 'Visual Material Selected (Sensing Active)' : selectedImage.name}
                           </p>
                           <p className="text-xs text-slate-400 mt-0.5">
                             {(selectedImage.size / (1024 * 1024)).toFixed(2)} MB • Visual Material Ready for Vision Analysis
@@ -819,7 +830,7 @@ export function UploadModal({
                       type="text"
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
-                      placeholder="e.g. Multivariable Calculus: Gradient Vectors"
+                      placeholder="Auto-detected from visual/audio content (or custom title)"
                       className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
                     />
                   </div>

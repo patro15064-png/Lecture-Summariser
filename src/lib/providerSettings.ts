@@ -157,7 +157,7 @@ export function getDefaultApiSettings(): UserApiSettings {
       quiz: { role: 'quiz', provider: 'gemini', model: 'gemini-2.0-flash' },
       chat: { role: 'chat', provider: 'gemini', model: 'gemini-2.0-flash' },
     },
-    rememberOnDevice: false,
+    rememberOnDevice: true,
   };
 }
 

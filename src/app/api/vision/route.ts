@@ -41,28 +41,30 @@ export async function POST(req: NextRequest) {
         ? 'gemini'
         : 'openai');
 
-    const visionSystemPrompt = `You are a world-class academic educator, curriculum synthesizer, and visual analyst.
-Analyze this image thoroughly and objectively:
+    const visionSystemPrompt = `You are a world-class visual analyst, computer vision researcher, and academic educator.
+Examine this image directly from its pixels.
 
-1. SUBJECT IDENTIFICATION:
-Determine what this image actually depicts:
-- Is it a photograph of nature, a landscape, astronomical phenomena, or scenery?
-- Is it handwritten notes, textbook pages, whiteboard drawings, or diagrams?
-- Is it biology, chemistry, physics, mathematics, history, literature, or art?
+CRITICAL INSTRUCTIONS:
+1. IGNORE ANY FILE NAME OR METADATA COMPLETELY. The filename may be an arbitrary hash (e.g. 5406a866d98d11e1f288db49710be550) or camera code. Your entire analysis MUST be grounded strictly in the visual pixels you see.
+2. SUBJECT IDENTIFICATION & TITLE:
+   - If it is pixel art, an 8-bit sprite, or retro digital graphics (e.g., a pixelated cat, animal, or game character), identify it specifically (e.g., "8-Bit Pixel Art Cat Character Sprite & 2D Raster Graphics").
+   - If it is natural scenery or a landscape (e.g. moonrise, mountains, twilight), identify it specifically (e.g., "Twilight Moonrise Over Alpine Peaks").
+   - If it is handwritten study notes, textbook pages, or whiteboard diagrams, identify the actual academic subject written on the page.
+3. AUTHENTIC CONTEXTUAL STUDY NOTES:
+   - For pixel art / retro sprites: explain 2D raster graphics, sprite sheets, palette indexing (1-bit / 8-bit), nearest-neighbor interpolation, silhouette readability, and retro game development constraints.
+   - For natural scenery / photography: explain atmospheric optics, Rayleigh/Mie scattering, lighting gradients, and geological formations.
+   - For quantitative STEM (math/physics notes): explain the formulas and concepts present.
+   - DO NOT invent mathematical formulas or calculus equations unless the image explicitly depicts quantitative mathematics!
+4. NO GENERIC BOILERPLATE: Never output generic phrases like "Every component operates within a coordinated system of interdependent elements". Provide deep, specific knowledge tailored to what is visible.
 
-2. PRECISE VISUAL TRANSCRIPTION & OBSERVATIONS:
-- If there is handwritten text or printed words, transcribe them verbatim.
-- If it is natural scenery, a landscape, or a photo, describe what is visible: the physical topography, lighting, celestial bodies, colors, and environmental context.
-- If it is a diagram or schematic, describe all components, arrows, and interactions.
+Format your response starting with:
+# [Accurate Subject Title Based Solely On Visual Content]
 
-3. SCIENTIFIC & EDUCATIONAL PRINCIPLES:
-- Explain the real mechanisms, natural phenomena, historical context, or conceptual laws depicted.
-- CRITICAL INSTRUCTION ON FORMULAS: DO NOT invent mathematical formulas or calculus equations unless this image is genuinely about mathematics, quantitative physics, or engineering! For landscapes, scenery, or photography, focus on atmospheric optics, geology, lighting, and environmental science.
-
-4. KEY CONCEPTS & LEARNING TAKEAWAYS:
-- Provide 3-5 grounded takeaways that would help a student understand and master this subject.
-
-Format with clear Markdown headers (e.g. "## 1. Overview & Subject Identification", "## 2. Key Mechanisms & Observations", "## 3. Core Principles & Real-World Science", "## 4. Key Takeaways").`;
+## 1. Visual Overview & Subject Identification
+...
+## 2. Core Principles & Techniques
+...
+## 3. Key Takeaways`;
 
     // 1. Google Gemini 2.0 Flash Vision
     if (effectiveKey && (effectiveProvider === 'gemini' || effectiveKey.startsWith('AIza'))) {
@@ -135,7 +137,7 @@ Format with clear Markdown headers (e.g. "## 1. Overview & Subject Identificatio
                 ],
               },
             ],
-            max_tokens: 4000,
+            max_tokens: 3000,
             temperature: 0.2,
           }),
         });

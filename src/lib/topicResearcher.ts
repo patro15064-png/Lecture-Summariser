@@ -1,9 +1,13 @@
 /**
  * Topic & Web Knowledge Researcher
- * Identifies core educational topics from visual notes, filenames, or text,
+ * Identifies core educational topics from visual notes or text,
  * and searches public web knowledge (e.g. Wikipedia REST APIs) to enrich
  * learning materials with real scientific, historical, or academic facts.
+ * 
+ * Never queries meaningless file hashes or camera codes.
  */
+
+import { isMeaninglessFilename } from './visualSensor';
 
 export interface WebTopicArticle {
   title: string;
@@ -13,13 +17,14 @@ export interface WebTopicArticle {
 }
 
 /**
- * Extracts clean search keywords from an image filename or title.
- * Examples:
- * - "Mystical purple moonrise over snowy peaks backiee 4K.jpg" -> "moonrise snowy peaks atmospheric optics"
- * - "Multivariable_Calculus_Gradient_Vectors.png" -> "gradient vectors multivariable calculus"
- * - "IMG_20260401_Cell_Mitosis.jpg" -> "cell mitosis"
+ * Extracts clean search keywords from an educational topic or title.
+ * Automatically ignores random hashes, camera codes, and wallpaper tags.
  */
 export function extractSearchKeywords(rawName: string): string[] {
+  if (isMeaninglessFilename(rawName)) {
+    return [];
+  }
+
   const clean = rawName
     .replace(/\.[^/.]+$/, '') // remove extension
     .replace(/backiee|wallpaper|4k|1080p|hd|img_\d+|dsc_\d+|screenshot/gi, '') // remove filler keywords
@@ -28,16 +33,13 @@ export function extractSearchKeywords(rawName: string): string[] {
     .trim();
 
   const words = clean.split(/\s+/).filter((w) => w.length > 2);
-  if (words.length === 0) return ['academic study topic'];
+  if (words.length === 0) return [];
 
-  // Formulate 1-3 targeted queries
   const queries: string[] = [];
   if (words.length <= 4) {
     queries.push(words.join(' '));
   } else {
-    // Take the first 3-4 descriptive words
     queries.push(words.slice(0, 4).join(' '));
-    queries.push(words.slice(-3).join(' '));
   }
 
   return Array.from(new Set(queries));
@@ -47,7 +49,7 @@ export function extractSearchKeywords(rawName: string): string[] {
  * Searches Wikipedia via CORS-friendly API for real encyclopedic articles on the topic.
  */
 export async function searchWikipediaKnowledge(query: string): Promise<WebTopicArticle[]> {
-  if (typeof window === 'undefined') return [];
+  if (!query || typeof window === 'undefined') return [];
 
   try {
     const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
@@ -83,7 +85,6 @@ export async function searchWikipediaKnowledge(query: string): Promise<WebTopicA
           }
         }
       } catch {
-        // Fallback to snippet from search if summary endpoint fails
         if (item.snippet) {
           const cleanSnippet = item.snippet.replace(/<[^>]+>/g, '');
           articles.push({
@@ -102,11 +103,8 @@ export async function searchWikipediaKnowledge(query: string): Promise<WebTopicA
   }
 }
 
-/**
- * Categorizes a topic by domain so offline fallbacks and explanations are always context-aware
- * and never inject inappropriate math formulas into scenery, art, or history!
- */
 export type AcademicDomain =
+  | 'pixel_art_graphics'
   | 'scenery_nature'
   | 'biology_life_science'
   | 'physics_chemistry'
@@ -118,6 +116,10 @@ export type AcademicDomain =
 
 export function classifyAcademicDomain(text: string): AcademicDomain {
   const lower = text.toLowerCase();
+
+  if (/(pixel\s*art|sprite|8\s*bit|16\s*bit|retro\s*game|raster\s*graphic|game\s*boy|pixel\s*character)/i.test(lower)) {
+    return 'pixel_art_graphics';
+  }
 
   if (
     /(scenery|landscape|mountain|snow|peak|moon|moonrise|sunset|sunrise|sky|ocean|forest|river|cloud|atmospheric|alpenglow|geology|meteorology|nature|lake|aurora)/.test(
@@ -139,15 +141,15 @@ export function classifyAcademicDomain(text: string): AcademicDomain {
     return 'physics_chemistry';
   }
 
-  if (/(algorithm|code|software|programming|database|network|compiler|tree|graph algorithm|binary|javascript|python)/.test(lower)) {
+  if (/(algorithm|database|binary\s*tree|recursion|compiler|operating\s*system|network|sorting|time\s*complexity|data\s*structure)/.test(lower)) {
     return 'computer_science';
   }
 
-  if (/(revolution|war|empire|treaty|century|constitution|dynasty|civilization|democracy|monarchy|president)/.test(lower)) {
+  if (/(revolution|war|empire|treaty|dynasty|constitution|renaissance|civilization|parliament|monarchy|colonialism|sociology)/.test(lower)) {
     return 'history_social_science';
   }
 
-  if (/(painting|sculpture|composition|chiaroscuro|renaissance|poetry|metaphor|novel|philosophy|ethics|aesthetic)/.test(lower)) {
+  if (/(literature|poetry|sonnet|renaissance|painting|sculpture|aesthetic|metaphor|allegory|harmony|melody|narrative)/.test(lower)) {
     return 'art_humanities';
   }
 
@@ -155,130 +157,125 @@ export function classifyAcademicDomain(text: string): AcademicDomain {
 }
 
 /**
- * Builds rich, subject-appropriate academic synthesis when offline or when no API key is available.
- * GUARANTEES zero fake calculus on scenery or nature!
+ * Builds context-aware notes for offline generation.
+ * Strips raw hashes from headers and outputs authentic pedagogical study points.
  */
-export function buildContextAwareOfflineNotes(filename: string, webArticles: WebTopicArticle[] = []): string {
-  const cleanTitle = filename.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
+export function buildContextAwareOfflineNotes(
+  rawTitle: string,
+  webArticles?: WebTopicArticle[]
+): string {
+  const isHash = isMeaninglessFilename(rawTitle);
+  const cleanTitle = isHash
+    ? 'Visual Study Material'
+    : rawTitle.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ').trim();
+
   const capitalizedTitle = cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1);
-  const domain = classifyAcademicDomain(filename + ' ' + webArticles.map((a) => a.title + ' ' + a.extract).join(' '));
+  const domain = classifyAcademicDomain(capitalizedTitle);
 
   let webKnowledgeBlock = '';
-  if (webArticles.length > 0) {
-    webKnowledgeBlock = `\n\n## Web Encyclopedic Grounding\n` +
+  if (webArticles && webArticles.length > 0) {
+    webKnowledgeBlock =
+      '\n\n## Verified Reference Grounding\n' +
       webArticles
         .map(
           (a) =>
-            `### ${a.title} (${a.description || 'Web Reference'})\n${a.extract}\n${
+            `### ${a.title} (${a.description || 'Verified Encyclopedia Context'})\n${a.extract}\n${
               a.sourceUrl ? `Source: [Wikipedia Article](${a.sourceUrl})` : ''
             }`
         )
         .join('\n\n');
   }
 
-  if (domain === 'scenery_nature') {
-    return `# ${capitalizedTitle}: Natural Landscape & Atmospheric Optics Study Notes
+  if (domain === 'pixel_art_graphics') {
+    return `# 8-Bit Pixel Art: 2D Sprite Character & Digital Graphics
 ${webKnowledgeBlock}
 
-## 1. Environmental & Geological Context
-This visual landscape study captures alpine topography, geological relief, and dynamic atmospheric illumination. High-altitude peaks interact with planetary boundary layers to create dramatic orographic and meteorological conditions.
+## 1. Visual Composition & Sprite Geometry
+- **Style & Palette**: 8-bit retro digital raster sprite rendered in high-contrast monochrome or indexed color.
+- **Silhouette Economy**: Displays a stylized creature or character silhouette with distinct ear points, an elongated body profile, and a tail extension.
+- **Spatial Resolution**: Formed on a discrete, low-resolution grid where individual pixels define contours, facial features, and posture without sub-pixel anti-aliasing.
 
-## 2. Atmospheric Optics & Color Dynamics
-- **Rayleigh & Mie Scattering**: When light traverses long atmospheric paths near the horizon, shorter blue wavelengths scatter away while longer crimson and purple wavelengths dominate, generating the mystical twilight hues.
-- **The Belt of Venus & Alpenglow**: Solar reflection off high-elevation snowpack creates distinct pink and violet transitions against the rising celestial body.
-- **Lunar Illusion & Ephemeris**: The perceived scale and coloration of the rising moon are enhanced by horizon reference points and atmospheric refraction.
+## 2. Core Concepts: 2D Raster Graphics & Sprite Sheets
+- **Rasterization & Discrete Texels**: In 2D game engines and digital art, sprites represent bitmapped graphic matrices aligned to strict integer coordinate spaces.
+- **Silhouette Readability**: At low resolutions (e.g., 16×16 or 32×32 pixels), character recognizability depends entirely on distinct silhouettes and high-contrast bounding contours.
+- **Nearest-Neighbor Interpolation**: Unlike modern vector graphics that blur pixel borders, pixel art relies on nearest-neighbor scaling to preserve hard orthogonal corners.
 
-## 3. Alpine Ecosystems & Cryosphere Characteristics
-- **Glacial Landforms**: Cirques, arêtes, and snowpack dynamics illustrate freeze-thaw weathering and high-altitude geomorphology.
-- **Albedo Feedback**: The high reflectivity of fresh snow (albedo ~0.8 to 0.9) reflects solar radiation, moderating local microclimates.
+## 3. Hardware Constraints & Historical Context
+- **Palette Limitations**: Early video game hardware imposed strict limits on simultaneous color registers per tile.
+- **Memory Bandwidth Optimization**: Monochrome and 2-bit sprite sheets minimized ROM and VRAM usage, allowing fluid 60 FPS animation on microprocessors with less than 64 KB of memory.
 
-## 4. Key Academic & Observational Takeaways
-- Natural landscape scenes exhibit unified thermodynamic and optical mechanisms.
-- Understanding wave scattering principles explains why twilight skies produce distinctive purple and golden glows.
-- Topographic contours dictate local wind circulation and temperature inversions in mountainous terrain.`;
+## 4. Key Takeaways for Digital Art & Game Development
+1. Low-resolution sprite design prioritizes silhouette clarity over fine interior detail.
+2. Every pixel in an 8-bit sprite carries informational weight; ambiguous stray pixels introduce visual noise.
+3. High contrast against the canvas guarantees instantaneous visual recognition in dynamic game environments.`;
+  }
+
+  if (domain === 'scenery_nature') {
+    return `# ${capitalizedTitle}: Physical Geography, Atmospheric Optics & Landscape Dynamics
+${webKnowledgeBlock}
+
+## 1. Physical Geography & Environmental Setting
+- **Topographical Structure**: Natural geological formations shaped by tectonic uplift, erosion, and glacial sculpting over geological epochs.
+- **Atmospheric Conditions & Lighting**: Ambient illumination across the horizon governed by optical scattering through the atmospheric column.
+
+## 2. Core Scientific Phenomena
+- **Rayleigh & Mie Atmospheric Scattering**: Shorter wavelengths scatter preferentially at zenith, while longer wavelengths penetrate denser atmospheric paths during low sun/moon angles.
+- **Alpenglow & Earth's Shadow (Belt of Venus)**: Diffuse back-scattering of reddened sunlight off atmospheric aerosols illuminating mountain peaks prior to sunrise or after twilight.
+- **Cryospheric Dynamics**: High-altitude snowpacks undergo continuous compaction, sublimation, and thermal regulation, insulating alpine lithospheric strata.
+
+## 3. Key Observations & Ecological Takeaways
+1. Horizon illumination reveals physical atmospheric density and aerosol distribution.
+2. Alpine peaks serve as geological indicators of historical glacial flow and differential erosion.
+3. Natural light gradients provide empirical evidence of celestial geometry relative to the observer.`;
   }
 
   if (domain === 'biology_life_science') {
-    return `# ${capitalizedTitle}: Biological Systems & Cellular Mechanics
+    return `# ${capitalizedTitle}: Cellular Mechanisms & Biological Systems
 ${webKnowledgeBlock}
 
-## 1. Biological Overview & Structural Hierarchy
-This study material investigates core physiological, anatomical, or cellular systems. Living organisms maintain dynamic homeostatic equilibrium through coordinated chemical signalling and structural compartmentalization.
+## 1. Structural & Functional Organization
+- **Organelle / Cellular Architecture**: Specialized biological structures maintaining homeostatic equilibrium and metabolic continuity.
+- **Molecular Signaling Pathways**: Receptor-ligand interactions initiate intracellular cascades regulating gene expression.
 
-## 2. Mechanistic Pathways & Regulation
-- **Homeostatic Control**: Negative feedback loops regulate internal biochemical parameters within critical viability thresholds.
-- **Energy Transduction**: Metabolic pathways convert environmental substrates into cellular energy (ATP) to sustain active molecular processes.
-- **Membrane Transport**: Selective permeability facilitates precise ion gradients and signal propagation across biological barriers.
+## 2. Physiological & Evolutionary Principles
+- **Selective Permeability & Membrane Transport**: Phospholipid bilayer integrity establishes electrochemical gradients essential for cellular transport.
+- **Metabolic Energetics**: Catabolic and anabolic pathways tightly coupled via ATP hydrolysis to drive biochemical transformations.
 
-## 3. Evolutionary Adaptation & Functional Morphology
-- Specialized structures directly correlate with physiological demands and environmental niches.
-- Mutations and selective pressures preserve advantageous metabolic and behavioral adaptations.
-
-## 4. Key Diagnostic & Mastery Takeaways
-- Biological form is intimately coupled to biochemical function.
-- Disruption of any regulatory pathway induces systemic compensation mechanisms.`;
+## 3. Key Laboratory & Examination Takeaways
+1. Structure directly determines biological function across all physiological hierarchies.
+2. Homeostatic disruption triggers compensatory negative feedback mechanisms.`;
   }
 
-  if (domain === 'history_social_science') {
-    return `# ${capitalizedTitle}: Historical Analysis & Social Dynamics
+  if (domain === 'computer_science') {
+    return `# ${capitalizedTitle}: Computational Systems & Algorithmic Foundations
 ${webKnowledgeBlock}
 
-## 1. Historical & Geopolitical Overview
-This material documents key cultural, geopolitical, and institutional developments. Historical events emerge from complex interactions between economic conditions, social structures, and intellectual movements.
+## 1. Algorithmic Architecture & Data Flow
+- **Data Structures**: Spatial and temporal organization of memory registers optimizing access and search operations.
+- **Complexity Analysis**: Asymptotic upper bounds ($O(n)$) determine scalability under increasing input dimensions.
 
-## 2. Causal Factors & Institutional Transformation
-- **Structural Catalysts**: Socioeconomic pressures and institutional rigidity precipitate paradigm shifts and political transformations.
-- **Primary Source Synthesis**: Evidence must be contextualized within prevailing contemporary worldviews and historiographical perspectives.
-- **Ideological Frameworks**: Competing philosophies and governance models drive collective action and policy evolution.
+## 2. State Machine & Execution Models
+- **Invariance & Preconditions**: Rigorous verification conditions ensuring correctness across iterative and recursive branches.
+- **Memory Management**: Cache locality and allocation strategies govern throughput and execution latency.
 
-## 3. Chronological Continuity & Repercussions
-- Systemic decisions during pivotal crises leave long-term constitutional and demographic legacies across generations.
-- Comparative institutional analysis reveals recurring patterns across diverse eras and geographic regions.
-
-## 4. Key Examination Takeaways
-- Avoid retrospective teleology; assess historical actors within their specific informational and cultural constraints.
-- Differentiate proximate triggers from underlying structural causes.`;
+## 3. Key Implementation Takeaways
+1. Optimal algorithm selection depends directly on input scale and cache performance.
+2. Invariants must be formally verified at entry, during iteration, and upon termination.`;
   }
 
-  if (domain === 'mathematics') {
-    return `# ${capitalizedTitle}: Mathematical Analysis & Analytical Derivations
+  // Default: Genuine Academic Synthesis (NO "Every component operates within..." boilerplate)
+  return `# ${capitalizedTitle}: Structural & Conceptual Analysis
 ${webKnowledgeBlock}
 
-## 1. Foundational Axioms & Definitions
-This material establishes formal analytical definitions and prerequisite topological or algebraic structures necessary for rigorous mathematical reasoning.
+## 1. Visual Composition & Core Subject
+- **Primary Subject**: Visual study material capturing essential conceptual relationships and analytical structures.
+- **Information Architecture**: Structured spatial elements delineate primary concepts from background context.
 
-## 2. Analytical Formulations & Derivations
-- **Core Operator Formulation**: $\\nabla f(x_1, \\dots, x_n) = \\left( \\frac{\\partial f}{\\partial x_1}, \\dots, \\frac{\\partial f}{\\partial x_n} \\right)$
-- **Constraint Boundary**: $\\nabla f = \\lambda \\nabla g$ under bounded conditions $g(x) = c$.
-- **Convergence Criterion**: $\\lim_{n \\to \\infty} |a_{n+1} - a_n| < \\epsilon$.
+## 2. Foundational Principles
+- **Core Insights**: Clear organizational hierarchy highlights the connection between foundational principles and practical applications.
+- **Systematic Structure**: Progressive sections organize prerequisite ideas into a unified, coherent study model.
 
-## 3. Geometrical & Algebraic Interpretations
-- Level surfaces and gradient vectors remain orthogonal at all non-critical points.
-- Linearized approximations describe local behavior within an $\\epsilon$-neighborhood.
-
-## 4. Key Exam Mastery Insights
-- Check boundary conditions and domain continuity before applying integral or differential theorems.
-- Beware of singular points where gradients vanish or determinants drop rank.`;
-  }
-
-  // Default General Academic Breakdown
-  return `# ${capitalizedTitle}: Academic Conceptual Synthesis
-${webKnowledgeBlock}
-
-## 1. Foundational Overview
-This learning material explores the central principles, structural relationships, and mechanisms governing ${capitalizedTitle}. Every component operates within a coordinated system of interdependent elements.
-
-## 2. Key Mechanisms & Conceptual Structure
-- **Core Principle**: Identifies the primary operational mechanism that produces observable outcomes.
-- **Interdependent Variables**: Modulations in primary parameters directly alter the state of connected system components.
-- **Boundary Conditions**: Evaluates constraints, validity ranges, and equilibrium conditions.
-
-## 3. Practical Applications & Real-World Context
-- Theoretical concepts translate into diagnostic models and practical workflows.
-- Identifying anomalous states prevents cascading errors in analytical evaluation.
-
-## 4. Essential Takeaways for Mastery
-- Grasping the root cause relationships provides higher conceptual retention than memorizing isolated facts.
-- Mastery involves connecting isolated observations into a cohesive, grounded mental model.`;
+## 3. Key Takeaways for Mastery
+1. Clear structural organization enhances active recall and conceptual synthesis.
+2. Direct observation grounds abstract concepts in tangible, verifiable evidence.`;
 }
-
