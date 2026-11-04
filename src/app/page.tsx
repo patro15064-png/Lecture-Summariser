@@ -166,10 +166,10 @@ export default function Home() {
                   e.stopPropagation();
                   setIsLibraryOpen(true);
                 }}
-                className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-300 transition-colors w-fit pt-0.5 group/hist"
+                className="mt-1 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-200 hover:text-white border border-indigo-400/40 text-[11px] font-semibold transition-all shadow-sm w-fit group/hist"
                 title="View past history of generated notes & study kits"
               >
-                <History className="w-3 h-3 text-indigo-400 group-hover/hist:rotate-[-25deg] transition-transform" />
+                <History className="w-3.5 h-3.5 text-indigo-400 group-hover/hist:rotate-[-25deg] transition-transform" />
                 <span>Past History {allLectures.length > 0 ? `(${allLectures.length})` : ''}</span>
               </button>
             </div>
@@ -221,6 +221,22 @@ export default function Home() {
               <span className="hidden sm:inline">Studio</span>
             </a>
 
+            {/* History Button (Also in Header Actions Toolbar) */}
+            <button
+              type="button"
+              onClick={() => setIsLibraryOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl border transition-all duration-200 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border-white/10 hover:border-indigo-500/30 shadow-sm"
+              title="Open past study kits & notes history"
+            >
+              <History className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden sm:inline">History</span>
+              {allLectures.length > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-500/20 text-indigo-300 font-mono">
+                  {allLectures.length}
+                </span>
+              )}
+            </button>
+
             {/* Zero-Trust BYO API Settings Trigger */}
             <button
               type="button"
@@ -257,6 +273,7 @@ export default function Home() {
             onOpenUpload={() => setIsUploadOpen(true)}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onLoadSample={handleLoadSample}
+            onOpenHistory={() => setIsLibraryOpen(true)}
             settings={settings}
             isLoadingSample={isLoadingSample}
           />

@@ -10,7 +10,8 @@ import {
   Video, 
   FileCode,
   ArrowRight,
-  Camera
+  Camera,
+  History
 } from 'lucide-react';
 import { UserApiSettings } from '@/types/lecture';
 
@@ -18,6 +19,7 @@ interface EmptyStateProps {
   onOpenUpload: () => void;
   onOpenSettings: () => void;
   onLoadSample: () => void;
+  onOpenHistory?: () => void;
   settings: UserApiSettings;
   isLoadingSample?: boolean;
 }
@@ -26,6 +28,7 @@ export function EmptyState({
   onOpenUpload,
   onOpenSettings,
   onLoadSample,
+  onOpenHistory,
   settings,
   isLoadingSample = false,
 }: EmptyStateProps) {
@@ -135,15 +138,28 @@ export function EmptyState({
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={onLoadSample}
-            disabled={isLoadingSample}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white border border-white/10 text-xs font-semibold transition-all disabled:opacity-50"
-          >
-            <FileText className="w-4 h-4 text-purple-400" />
-            <span>{isLoadingSample ? 'Processing Sample...' : 'Load Sample (Sample)'}</span>
-          </button>
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={onLoadSample}
+              disabled={isLoadingSample}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white border border-white/10 text-xs font-semibold transition-all disabled:opacity-50"
+            >
+              <FileText className="w-4 h-4 text-purple-400" />
+              <span>{isLoadingSample ? 'Processing Sample...' : 'Load Sample (Sample)'}</span>
+            </button>
+
+            {onOpenHistory && (
+              <button
+                type="button"
+                onClick={onOpenHistory}
+                className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-950/40 hover:bg-indigo-900/60 text-indigo-300 hover:text-white border border-indigo-500/25 text-xs font-semibold transition-all"
+              >
+                <History className="w-3.5 h-3.5 text-indigo-400" />
+                <span>View Past History &amp; Saved Notes</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Bring Your Own API Status */}
