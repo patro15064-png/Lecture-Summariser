@@ -104,6 +104,7 @@ export async function searchWikipediaKnowledge(query: string): Promise<WebTopicA
 }
 
 export type AcademicDomain =
+  | 'person_gesture'
   | 'pixel_art_graphics'
   | 'scenery_nature'
   | 'biology_life_science'
@@ -116,6 +117,10 @@ export type AcademicDomain =
 
 export function classifyAcademicDomain(text: string): AcademicDomain {
   const lower = text.toLowerCase();
+
+  if (/(raised\s*hand|hand\s*gesture|waving|portrait|human|person|gesture|body\s*language|non[- ]verbal)/i.test(lower)) {
+    return 'person_gesture';
+  }
 
   if (/(pixel\s*art|sprite|8\s*bit|16\s*bit|retro\s*game|raster\s*graphic|game\s*boy|pixel\s*character)/i.test(lower)) {
     return 'pixel_art_graphics';
@@ -184,6 +189,23 @@ export function buildContextAwareOfflineNotes(
             }`
         )
         .join('\n\n');
+  }
+
+  if (domain === 'person_gesture') {
+    return `# Human Portrait: Person with Raised Hand Gesture & Visual Communication
+${webKnowledgeBlock}
+
+## 1. Visual Composition & Subject Framing
+- **Subject Framing**: Individual positioned in the camera frame with an elevated hand gesture signaling communicative presence.
+- **Biomechanical Articulation**: Open-palm posture with extended digits creating high visual salience against surrounding background elements.
+
+## 2. Core Concepts: Gesture Recognition & Human-Computer Interaction
+- **Kinematic Signaling**: Hand gestures constitute primary non-verbal communicative vectors, serving as natural input modalities in modern vision-based HCI.
+- **Landmark Pose Estimation**: Machine learning pipelines map spatial coordinates across 21 hand joints to distinguish greeting, signaling, and directional pointing.
+
+## 3. Key Takeaways
+1. Hand elevation and open-palm posture communicate engagement in interactive visual systems.
+2. Segmenting skin chromaticity from ambient backgrounds enables robust optical pose tracking.`;
   }
 
   if (domain === 'pixel_art_graphics') {

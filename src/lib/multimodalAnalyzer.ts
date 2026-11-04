@@ -121,10 +121,12 @@ Examine this image directly from its pixels.
 CRITICAL INSTRUCTIONS:
 1. IGNORE ANY FILE NAME OR METADATA. The file name may be a random hash (e.g. 5406a866d98d11e1f288db49710be550) or camera code. Your analysis MUST be grounded strictly in the visual pixels you see.
 2. SUBJECT IDENTIFICATION & TITLE:
+   - If it is a person, portrait, or camera capture (e.g., an individual raising their hand, waving, gesturing, or presenting), describe their physical posture, hand elevation, gestures, clothing, setting, and communicative intent specifically (e.g., "Human Portrait: Person with Raised Hand Gesture & Visual Communication").
    - If it is pixel art, an 8-bit sprite, or retro digital graphics (e.g., a pixelated cat, creature, or game character), identify it specifically (e.g., "8-Bit Pixel Art Cat Character Sprite: 2D Raster Graphics").
    - If it is natural scenery or a landscape (e.g. moonrise, mountains, twilight), identify it specifically (e.g., "Twilight Moonrise Over Alpine Peaks").
    - If it is handwritten study notes, textbook pages, or whiteboard diagrams, identify the actual academic subject written on the page.
 3. AUTHENTIC CONTEXTUAL STUDY NOTES:
+   - For human portraits & gestures: explain human-computer interaction (HCI), computer vision skeletal landmark tracking (wrist, knuckles, phalanges), non-verbal communicative signaling, and body language kinetics.
    - For pixel art / retro sprites: explain 2D raster graphics, sprite sheets, palette indexing (1-bit / 8-bit), nearest-neighbor interpolation, silhouette readability, and retro game development constraints.
    - For natural scenery / photography: explain atmospheric optics, Rayleigh/Mie scattering, lighting gradients, and geological formations.
    - For quantitative STEM (math/physics notes): explain the formulas and concepts present.

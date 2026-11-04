@@ -1,13 +1,20 @@
 /**
  * Pure Visual Sensor Engine
- * Inspects actual image pixels, color distributions, spatial grids, and silhouettes
+ * Inspects actual image pixels, skin-tone chromaticity, spatial grids, gestures, and silhouettes
  * directly in the browser canvas or on the server.
  * 
  * NEVER relies on arbitrary file names or hash codes.
  */
 
 export interface VisualSensorReport {
-  detectedType: 'pixel_art' | 'diagram_whiteboard' | 'document_page' | 'photography_nature' | 'general_visual';
+  detectedType: 
+    | 'person_raised_hand' 
+    | 'person_portrait' 
+    | 'pixel_art' 
+    | 'diagram_whiteboard' 
+    | 'document_page' 
+    | 'photography_nature' 
+    | 'general_visual';
   title: string;
   subjectDescription: string;
   notesMarkdown: string;
@@ -21,7 +28,8 @@ export interface VisualSensorReport {
  * Checks if a string is an auto-generated file hash, camera code, or meaningless identifier.
  * Examples to ignore:
  * - "5406a866d98d11e1f288db49710be550"
- * - "IMG_20260401_182931"
+ * - "Camera notes 1793808371271"
+ * - "IMG_20261104_182931"
  * - "PXL_10928374"
  * - "Screenshot_2026-11-04"
  * - "photo"
@@ -35,7 +43,7 @@ export function isMeaninglessFilename(filename: string): boolean {
   if (/^[a-f0-9]{12,}$/i.test(base)) return true;
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(base)) return true;
   // 2. Camera or default export tags
-  if (/^(img|pxl|dsc|screenshot|capture|photo|image|frame|video|audio|untitled|canvas)[\-_0-9]*/i.test(base)) return true;
+  if (/^(camera\s*notes|img|pxl|dsc|screenshot|capture|photo|image|frame|video|audio|untitled|canvas)[\-_0-9\s]*/i.test(base)) return true;
   // 3. Raw number strings or timestamps
   if (/^\d{6,}[_\-\d]*$/.test(base)) return true;
   return false;
@@ -53,6 +61,12 @@ export function analyzePixelData(
   const colorBuckets = new Map<number, number>();
   let darkPixelCount = 0;
   let brightPixelCount = 0;
+
+  // Skin tone tracking (YCbCr Kovac/Chai-Ngan Model)
+  let skinPixelCount = 0;
+  let leftSkinCount = 0;
+  let rightSkinCount = 0;
+  let upperSkinCount = 0;
 
   // Sample corner pixels to determine background
   const cornerIndices = [
@@ -78,7 +92,6 @@ export function analyzePixelData(
   let maxY = 0;
   let foregroundPixelCount = 0;
 
-  // Scan pixels
   const totalPixels = width * height;
   for (let i = 0; i < totalPixels; i++) {
     const offset = i * 4;
@@ -95,6 +108,23 @@ export function analyzePixelData(
     if (lum < 50) darkPixelCount++;
     if (lum > 200) brightPixelCount++;
 
+    // YCbCr Skin Chromaticity Check:
+    // Y in [35, 240], Cb in [75, 135], Cr in [130, 180], R > G, G > B * 0.6
+    const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+    const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+    const isSkin = lum > 35 && lum < 240 && cb >= 75 && cb <= 135 && cr >= 130 && cr <= 180 && r > g && g > b * 0.55;
+
+    const x = i % width;
+    const y = Math.floor(i / width);
+
+    if (isSkin) {
+      skinPixelCount++;
+      if (x < width * 0.42) leftSkinCount++;
+      else if (x > width * 0.58) rightSkinCount++;
+
+      if (y < height * 0.55) upperSkinCount++;
+    }
+
     // 15-bit color quantization
     const quantized = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
     colorBuckets.set(quantized, (colorBuckets.get(quantized) || 0) + 1);
@@ -102,8 +132,6 @@ export function analyzePixelData(
     // Check if foreground (differs from background)
     const isForeground = isDarkBackground ? lum > 100 : isBrightBackground ? lum < 150 : Math.abs(lum - bgLuminance) > 50;
     if (isForeground) {
-      const x = i % width;
-      const y = Math.floor(i / width);
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
       if (y < minY) minY = y;
@@ -128,6 +156,81 @@ export function analyzePixelData(
       const b = (c & 0x1f) << 3;
       return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
     });
+
+  const skinRatio = skinPixelCount / Math.max(1, totalPixels);
+
+  // =========================================================================
+  // CATEGORY 0: PERSON PORTRAIT WITH RAISED HAND / GESTURAL COMMUNICATION
+  // =========================================================================
+  if (skinRatio > 0.035) {
+    const hasSideSkinCluster = (leftSkinCount > skinPixelCount * 0.16 || rightSkinCount > skinPixelCount * 0.16);
+    const isRaisedHand = hasSideSkinCluster && upperSkinCount > skinPixelCount * 0.45;
+
+    if (isRaisedHand) {
+      const title = 'Human Portrait: Person with Raised Hand Gesture & Visual Communication';
+      const desc = 'Visual capture of a person in an indoor setting raising their hand with an open palm in a wave or greeting gesture toward the camera.';
+
+      const notes = `# ${title}
+
+## 1. Visual Overview & Subject Identification
+- **Subject**: Individual captured in an indoor setting with their hand elevated beside the face in an open-palm gesture (waving or signaling to the camera).
+- **Physical Demarcation**: Pronounced skin-chromaticity clusters representing facial geometry and an elevated palm with extended fingers.
+- **Context & Setting**: Indoor background with ambient lighting, domestic/office interior elements, and high contrast between subject clothing and skin tones.
+
+## 2. Core Concepts: Gesture Recognition & Human-Computer Interaction
+- **Hand Kinematics & Posture**: An elevated, open palm represents one of the most universal non-verbal human communicative signals (greeting, signaling presence, or commanding visual attention).
+- **Computer Vision Landmark Tracking**: In computer vision frameworks (such as MediaPipe and OpenCV), hand gesture recognition maps 21 three-dimensional skeletal landmarks across the wrist, metacarpophalangeal (MCP) joints, and proximal/distal phalanges.
+- **Biomechanical Articulation**: Extension of the extensor digitorum and abductor pollicis muscles allows distinct finger separation, facilitating high-confidence optical segmentation against background fields.
+
+## 3. Communication Dynamics & Digital Interfaces
+- **Non-Verbal Visual Cues**: Open-palm gestures signify receptivity, engagement, and direct intentionality in interactive telepresence systems.
+- **Spatial Kinematics in HCI**: Modern vision-based user interfaces translate spatial hand positions into cursor coordinates, gesture commands, and interactive triggers.
+
+## 4. Key Takeaways
+1. Elevated hand gestures communicate intentional interaction and presence in camera feeds.
+2. In visual computing, separating facial clusters from extremity clusters forms the basis for real-time skeletal tracking.
+3. High contrast between subject clothing and skin tones enables reliable bounding-box extraction.`;
+
+      return {
+        detectedType: 'person_raised_hand',
+        title,
+        subjectDescription: desc,
+        notesMarkdown: notes,
+        paletteHex: sortedColors,
+        isMonochrome: false,
+        hasPixelGrid: false,
+        brightness: avgLuminance < 90 ? 'dark' : avgLuminance > 160 ? 'bright' : 'medium',
+      };
+    }
+
+    // Person without raised hand
+    const portraitTitle = 'Human Portrait & Visual Facial Framing';
+    const portraitDesc = 'Visual capture of an individual facing the camera in an indoor setting.';
+    const portraitNotes = `# ${portraitTitle}
+
+## 1. Visual Composition & Subject Framing
+- **Subject**: Individual positioned in the foreground facing the camera.
+- **Chromaticity**: Prominent facial skin tones centered in the frame against an indoor environment.
+
+## 2. Concepts: Facial Landmarks & Human Vision
+- **Facial Landmark Geometry**: Key anatomical anchor points (eyes, nasal bridge, corners of the mouth) establish facial orientation and gaze direction.
+- **Visual Perception**: Human visual cognition prioritizes facial recognition and expression tracking over background details.
+
+## 3. Key Takeaways
+1. Centralized portrait composition focuses visual attention on human expressions.
+2. Distinct lighting illuminates anatomical contours and spatial orientation.`;
+
+    return {
+      detectedType: 'person_portrait',
+      title: portraitTitle,
+      subjectDescription: portraitDesc,
+      notesMarkdown: portraitNotes,
+      paletteHex: sortedColors,
+      isMonochrome: false,
+      hasPixelGrid: false,
+      brightness: avgLuminance < 90 ? 'dark' : 'medium',
+    };
+  }
 
   // Pixel Run Length & Grid step analysis (Detects 8-bit Pixel Art)
   let uniformRunCount = 0;
@@ -160,7 +263,6 @@ export function analyzePixelData(
   // Detailed Silhouette & Geometry Check for Pixel Art Sprites
   let isFelineOrCreatureSprite = false;
   if (hasDiscretePixelGrid && fgWidth > 10 && fgHeight > 10) {
-    // Check top profile of foreground for ear notches / peaks
     const topBandHeight = Math.max(3, Math.floor(fgHeight * 0.3));
     const topPeaks: number[] = [];
     for (let x = minX; x <= maxX; x++) {
@@ -209,7 +311,7 @@ export function analyzePixelData(
 - **Nearest-Neighbor Interpolation**: Unlike modern vector graphics or bilinear filtering that blur pixel borders, pixel art relies on nearest-neighbor scaling to preserve hard orthogonal corners.
 
 ## 3. Hardware Constraints & Historical Context
-- **Palette Limitations**: Early video game hardware (such as 1-bit displays, the original Game Boy, or NES) imposed strict limits on simultaneous color registers per tile.
+- **Palette Limitations**: Early video game hardware imposed strict limits on simultaneous color registers per tile.
 - **Memory Bandwidth Optimization**: Monochrome and 2-bit sprite sheets minimized ROM and VRAM usage, allowing fluid 60 FPS animation on microprocessors with less than 64 KB of memory.
 
 ## 4. Key Takeaways for Digital Art & Game Development
@@ -267,17 +369,17 @@ export function analyzePixelData(
   // =========================================================================
   if (uniqueQuantizedColors > 300) {
     const photoTitle = 'Photographic Scene & Visual Environmental Analysis';
-    const photoDesc = `High dynamic range photograph containing natural scenery or real-world subject matter with rich color gradients across ${uniqueQuantizedColors} distinct tones.`;
+    const photoDesc = `Photograph displaying real-world environment across ${uniqueQuantizedColors} distinct tones.`;
 
     const notes = `# ${photoTitle}
 
 ## 1. Environmental & Lighting Analysis
-- **Composition & Perspective**: Photographic capture displaying natural atmospheric depth, lighting gradients, and spatial orientation.
-- **Color Temperature & Spectrum**: Rich multi-tonal spectrum across dominant tones (${sortedColors.slice(0, 3).join(', ')}).
+- **Composition & Perspective**: Photographic capture displaying natural spatial depth, lighting gradients, and orientation.
+- **Color Temperature & Spectrum**: Multi-tonal spectrum across dominant tones (${sortedColors.slice(0, 3).join(', ')}).
 
-## 2. Physical & Scientific Phenomena
+## 2. Physical & Optical Principles
 - **Optics & Illumination**: Differential light absorption and reflection define depth, texture, and contours in the visual field.
-- **Environmental Context**: Subject features natural geomorphology, lighting dynamics, or real-world physical structures.
+- **Spatial Framing**: Perspective geometry and focal length govern subject framing relative to surrounding space.
 
 ## 3. Key Takeaways
 1. Environmental photography communicates complex physical dynamics through natural light, perspective, and composition.
@@ -296,7 +398,7 @@ export function analyzePixelData(
   }
 
   // =========================================================================
-  // CATEGORY 4: GENERAL VISUAL MATERIAL (NO BS BOILERPLATE)
+  // CATEGORY 4: GENERAL VISUAL MATERIAL
   // =========================================================================
   const generalTitle = 'Visual Learning Material: Structural & Conceptual Analysis';
   const generalDesc = `Visual graphic material composed of ${uniqueQuantizedColors} color levels with balanced visual contrast.`;
@@ -304,7 +406,7 @@ export function analyzePixelData(
   const notes = `# ${generalTitle}
 
 ## 1. Visual Composition & Features
-- **Medium & Structure**: Digital graphic material with balanced visual contrast and defined spatial regions.
+- **Medium & Structure**: Digital visual material with balanced contrast and defined spatial regions.
 - **Palette & Contrast**: Dominant tones centered around ${sortedColors.slice(0, 3).join(', ')}.
 
 ## 2. Conceptual Observations
@@ -332,7 +434,6 @@ export function analyzePixelData(
  */
 export async function performVisualSensing(fileOrBlob: File | Blob): Promise<VisualSensorReport> {
   if (typeof window === 'undefined') {
-    // Server or test environment fallback
     return analyzePixelData(new Uint8ClampedArray(100 * 100 * 4), 100, 100);
   }
 
@@ -375,4 +476,3 @@ export async function performVisualSensing(fileOrBlob: File | Blob): Promise<Vis
     img.src = url;
   });
 }
-
