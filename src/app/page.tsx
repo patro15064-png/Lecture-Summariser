@@ -13,6 +13,7 @@ import { FeynmanCoach } from '@/components/FeynmanCoach';
 import { ExportModal } from '@/components/ExportModal';
 import { UploadModal } from '@/components/UploadModal';
 import { SettingsModal } from '@/components/SettingsModal';
+import { StudyKitsLibraryModal } from '@/components/StudyKitsLibraryModal';
 import { EmptyState } from '@/components/EmptyState';
 import { DEMO_LECTURES } from '@/data/demoLectures';
 import { LectureArtifact, UserApiSettings } from '@/types/lecture';
@@ -34,7 +35,8 @@ import {
   Download,
   Compass,
   Award,
-  Sparkles
+  Sparkles,
+  History
 } from 'lucide-react';
 
 export default function Home() {
@@ -49,6 +51,7 @@ export default function Home() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isLoadingSample, setIsLoadingSample] = useState(false);
 
   const [settings, setSettings] = useState<UserApiSettings>(() => loadUserApiSettings());
@@ -156,6 +159,19 @@ export default function Home() {
                   Multimodal v2.0
                 </span>
               </div>
+              {/* Small icon below logo for viewing past history */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsLibraryOpen(true);
+                }}
+                className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-indigo-300 transition-colors w-fit pt-0.5 group/hist"
+                title="View past history of generated notes & study kits"
+              >
+                <History className="w-3 h-3 text-indigo-400 group-hover/hist:rotate-[-25deg] transition-transform" />
+                <span>Past History {allLectures.length > 0 ? `(${allLectures.length})` : ''}</span>
+              </button>
             </div>
           </div>
 
@@ -419,6 +435,22 @@ export default function Home() {
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
         onUpdateSettings={handleUpdateSettings}
+      />
+
+      <StudyKitsLibraryModal
+        isOpen={isLibraryOpen}
+        onClose={() => {
+          setIsLibraryOpen(false);
+          getAllSavedStudyKits().then((saved) => {
+            if (saved) setAllLectures(saved);
+          }).catch(() => {});
+        }}
+        onSelectKit={(kit) => {
+          setActiveLecture(kit);
+          setCurrentTime(0);
+          setIsPlaying(false);
+          setIsLibraryOpen(false);
+        }}
       />
 
       {activeLecture && (
