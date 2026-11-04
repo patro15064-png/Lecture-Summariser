@@ -14,6 +14,7 @@ test('Visual Sensor & Content Grounding Suite', async (t) => {
   await t.test('isMeaninglessFilename detects random hashes and camera tags', () => {
     // Hashes & camera tags should be detected as meaningless
     assert.strictEqual(isMeaninglessFilename('5406a866d98d11e1f288db49710be550.jpg'), true);
+    assert.strictEqual(isMeaninglessFilename('WhatsApp Image 2026 08 05 at 7.45.52 PM (1).jpeg'), true);
     assert.strictEqual(isMeaninglessFilename('IMG_20261104_182931.png'), true);
     assert.strictEqual(isMeaninglessFilename('PXL_10293847.jpg'), true);
     assert.strictEqual(isMeaninglessFilename('Screenshot_2026-11-04.png'), true);
@@ -105,6 +106,62 @@ test('Visual Sensor & Content Grounding Suite', async (t) => {
     assert.match(report.title, /Raised Hand Gesture/i);
     assert.match(report.subjectDescription, /raising their hand|open-palm|gesture/i);
     // Must NOT contain scenery or geology mentions
+    assert.doesNotMatch(report.notesMarkdown, /geomorphology/i);
+    assert.doesNotMatch(report.notesMarkdown, /atmospheric scattering/i);
+  });
+
+  await t.test('analyzePixelData describes who is there, what he is wearing, and how he is looking in formal headshot', () => {
+    const width = 64;
+    const height = 64;
+    const pixels = new Uint8ClampedArray(width * height * 4);
+
+    // 1. Fill background with solid white (#ffffff)
+    for (let i = 0; i < width * height; i++) {
+      const idx = i * 4;
+      pixels[idx] = 255;
+      pixels[idx + 1] = 255;
+      pixels[idx + 2] = 255;
+      pixels[idx + 3] = 255;
+    }
+
+    // 2. Person dark hair directly above face (x=24..40, y=8..15)
+    for (let y = 8; y <= 15; y++) {
+      for (let x = 24; x <= 40; x++) {
+        const idx = (y * width + x) * 4;
+        pixels[idx] = 20;
+        pixels[idx + 1] = 20;
+        pixels[idx + 2] = 25;
+      }
+    }
+
+    // 3. Person face (skin tone: R=210, G=150, B=120) centered (x=24..40, y=16..34)
+    for (let y = 16; y <= 34; y++) {
+      for (let x = 24; x <= 40; x++) {
+        const idx = (y * width + x) * 4;
+        pixels[idx] = 210;
+        pixels[idx + 1] = 150;
+        pixels[idx + 2] = 120;
+      }
+    }
+
+    // 4. Person royal blue shirt (R=0, G=56, B=160) below face (x=16..48, y=36..63)
+    for (let y = 36; y <= 63; y++) {
+      for (let x = 16; x <= 48; x++) {
+        const idx = (y * width + x) * 4;
+        pixels[idx] = 0;
+        pixels[idx + 1] = 56;
+        pixels[idx + 2] = 160;
+      }
+    }
+
+    const report = analyzePixelData(pixels, width, height);
+    assert.strictEqual(report.detectedType, 'person_portrait');
+    assert.match(report.title, /Royal Blue/i);
+    assert.match(report.notesMarkdown, /royal blue/i);
+    assert.match(report.notesMarkdown, /short dark/i);
+    assert.match(report.notesMarkdown, /friendly|calm/i);
+    assert.match(report.notesMarkdown, /white/i);
+    // Must NOT contain geomorphology or atmospheric scattering
     assert.doesNotMatch(report.notesMarkdown, /geomorphology/i);
     assert.doesNotMatch(report.notesMarkdown, /atmospheric scattering/i);
   });

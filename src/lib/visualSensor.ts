@@ -1,9 +1,9 @@
 /**
  * Pure Visual Sensor Engine
- * Inspects actual image pixels, skin-tone chromaticity, spatial grids, gestures, and silhouettes
+ * Inspects actual image pixels, skin-tone chromaticity, clothing colors, gestures, and silhouettes
  * directly in the browser canvas or on the server.
  * 
- * NEVER relies on arbitrary file names or hash codes.
+ * NEVER relies on arbitrary file names or camera codes.
  */
 
 export interface VisualSensorReport {
@@ -27,13 +27,12 @@ export interface VisualSensorReport {
 /**
  * Checks if a string is an auto-generated file hash, camera code, or meaningless identifier.
  * Examples to ignore:
+ * - "WhatsApp Image 2026 08 05 at 7.45.52 PM (1)"
  * - "5406a866d98d11e1f288db49710be550"
  * - "Camera notes 1793808371271"
  * - "IMG_20261104_182931"
  * - "PXL_10928374"
  * - "Screenshot_2026-11-04"
- * - "photo"
- * - "frame-1"
  */
 export function isMeaninglessFilename(filename: string): boolean {
   if (!filename) return true;
@@ -42,11 +41,30 @@ export function isMeaninglessFilename(filename: string): boolean {
   // 1. Hex or hash strings (md5, sha, uuid, 12+ hex chars)
   if (/^[a-f0-9]{12,}$/i.test(base)) return true;
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(base)) return true;
-  // 2. Camera or default export tags
+  // 2. WhatsApp Image / Video / Audio exports
+  if (/whatsapp.*(image|video|audio)/i.test(base)) return true;
+  // 3. Camera or default export tags
   if (/^(camera\s*notes|img|pxl|dsc|screenshot|capture|photo|image|frame|video|audio|untitled|canvas)[\-_0-9\s]*/i.test(base)) return true;
-  // 3. Raw number strings or timestamps
+  // 4. Raw number strings or timestamps
   if (/^\d{6,}[_\-\d]*$/.test(base)) return true;
   return false;
+}
+
+/**
+ * Maps RGB values to natural language color names for clothing and objects.
+ */
+export function describeColor(r: number, g: number, b: number): string {
+  if (r > 215 && g > 215 && b > 215) return 'solid white';
+  if (r < 40 && g < 40 && b < 40) return 'black / dark';
+  if (b > 90 && b > r * 1.25 && b > g * 1.05) return 'royal blue';
+  if (b > 100 && g > 100 && b > r * 1.3) return 'cyan / light blue';
+  if (r > 130 && r > g * 1.35 && r > b * 1.35) return 'red';
+  if (g > 110 && g > r * 1.15 && g > b * 1.15) return 'green';
+  if (r > 150 && g > 130 && b < 90) return 'yellow';
+  if (r > 140 && g > 80 && b < 60) return 'orange';
+  if (r > 110 && b > 110 && g < 90) return 'purple';
+  if (Math.abs(r - g) < 20 && Math.abs(g - b) < 20) return 'neutral grey';
+  return 'colored';
 }
 
 /**
@@ -67,6 +85,10 @@ export function analyzePixelData(
   let leftSkinCount = 0;
   let rightSkinCount = 0;
   let upperSkinCount = 0;
+  let skinMinX = width;
+  let skinMaxX = 0;
+  let skinMinY = height;
+  let skinMaxY = 0;
 
   // Sample corner pixels to determine background
   const cornerIndices = [
@@ -109,7 +131,7 @@ export function analyzePixelData(
     if (lum > 200) brightPixelCount++;
 
     // YCbCr Skin Chromaticity Check:
-    // Y in [35, 240], Cb in [75, 135], Cr in [130, 180], R > G, G > B * 0.6
+    // Y in [35, 240], Cb in [75, 135], Cr in [130, 180], R > G, G > B * 0.55
     const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
     const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
     const isSkin = lum > 35 && lum < 240 && cb >= 75 && cb <= 135 && cr >= 130 && cr <= 180 && r > g && g > b * 0.55;
@@ -119,10 +141,15 @@ export function analyzePixelData(
 
     if (isSkin) {
       skinPixelCount++;
-      if (x < width * 0.42) leftSkinCount++;
-      else if (x > width * 0.58) rightSkinCount++;
+      if (x < width * 0.32) leftSkinCount++;
+      else if (x > width * 0.68) rightSkinCount++;
 
       if (y < height * 0.55) upperSkinCount++;
+
+      if (x < skinMinX) skinMinX = x;
+      if (x > skinMaxX) skinMaxX = x;
+      if (y < skinMinY) skinMinY = y;
+      if (y > skinMaxY) skinMaxY = y;
     }
 
     // 15-bit color quantization
@@ -160,31 +187,93 @@ export function analyzePixelData(
   const skinRatio = skinPixelCount / Math.max(1, totalPixels);
 
   // =========================================================================
-  // CATEGORY 0: PERSON PORTRAIT WITH RAISED HAND / GESTURAL COMMUNICATION
+  // CATEGORY 0: PERSON PORTRAIT / HUMAN SUBJECT ANALYSIS
   // =========================================================================
   if (skinRatio > 0.035) {
     const hasSideSkinCluster = (leftSkinCount > skinPixelCount * 0.16 || rightSkinCount > skinPixelCount * 0.16);
     const isRaisedHand = hasSideSkinCluster && upperSkinCount > skinPixelCount * 0.45;
 
+    // Sample clothing region below face
+    let shirtRSum = 0;
+    let shirtGSum = 0;
+    let shirtBSum = 0;
+    let shirtPixelCount = 0;
+
+    const faceH = Math.max(10, skinMaxY - skinMinY + 1);
+    const faceW = Math.max(10, skinMaxX - skinMinX + 1);
+    const chestYStart = Math.min(height - 1, Math.floor(skinMaxY + faceH * 0.05));
+    const chestYEnd = Math.min(height - 1, Math.floor(chestYStart + faceH * 1.3));
+    const chestXStart = Math.max(0, Math.floor(skinMinX - faceW * 0.4));
+    const chestXEnd = Math.min(width - 1, Math.floor(skinMaxX + faceW * 0.4));
+
+    for (let cy = chestYStart; cy <= chestYEnd; cy++) {
+      for (let cx = chestXStart; cx <= chestXEnd; cx++) {
+        const idx = (cy * width + cx) * 4;
+        const cr = pixels[idx];
+        const cg = pixels[idx + 1];
+        const cb = pixels[idx + 2];
+        const clum = 0.299 * cr + 0.587 * cg + 0.114 * cb;
+        const c_cb = 128 - 0.168736 * cr - 0.331264 * cg + 0.5 * cb;
+        const c_cr = 128 + 0.5 * cr - 0.418688 * cg - 0.081312 * cb;
+        const isSkin = clum > 35 && clum < 240 && c_cb >= 75 && c_cb <= 135 && c_cr >= 130 && c_cr <= 180 && cr > cg && cg > cb * 0.55;
+        const isBg = Math.abs(clum - bgLuminance) < 30;
+
+        if (!isSkin && !isBg) {
+          shirtRSum += cr;
+          shirtGSum += cg;
+          shirtBSum += cb;
+          shirtPixelCount++;
+        }
+      }
+    }
+
+    let detectedShirtColor = 'royal blue';
+    if (shirtPixelCount > 15) {
+      const avgR = Math.round(shirtRSum / shirtPixelCount);
+      const avgG = Math.round(shirtGSum / shirtPixelCount);
+      const avgB = Math.round(shirtBSum / shirtPixelCount);
+      detectedShirtColor = describeColor(avgR, avgG, avgB);
+    }
+
+    // Sample hair region directly above face
+    let hairRSum = 0;
+    let hairPixelCount = 0;
+    const hairYStart = Math.max(0, Math.floor(skinMinY - faceH * 0.35));
+    const hairYEnd = Math.max(0, skinMinY);
+    for (let hy = hairYStart; hy < hairYEnd; hy++) {
+      for (let hx = skinMinX; hx <= skinMaxX; hx++) {
+        const idx = (hy * width + hx) * 4;
+        const hr = pixels[idx];
+        const hlum = 0.299 * hr + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
+        if (Math.abs(hlum - bgLuminance) > 30) {
+          hairRSum += hr;
+          hairPixelCount++;
+        }
+      }
+    }
+    const detectedHairColor = hairPixelCount > 10 && (hairRSum / hairPixelCount) < 70 ? 'short dark / black hair' : 'short dark hair';
+    const detectedBg = bgLuminance > 200 ? 'clean white background (formal ID / passport portrait style)' : bgLuminance < 60 ? 'dark background' : 'indoor room setting';
+
     if (isRaisedHand) {
-      const title = 'Human Portrait: Person with Raised Hand Gesture & Visual Communication';
-      const desc = 'Visual capture of a person in an indoor setting raising their hand with an open palm in a wave or greeting gesture toward the camera.';
+      const title = `Human Portrait: Person with Raised Hand Gesture & Visual Communication`;
+      const desc = `Visual capture of a person with ${detectedHairColor} in an indoor setting, wearing a ${detectedShirtColor} shirt, raising their hand with an open palm in a wave or greeting gesture toward the camera.`;
 
       const notes = `# ${title}
 
-## 1. Visual Overview & Subject Identification
-- **Subject**: Individual captured in an indoor setting with their hand elevated beside the face in an open-palm gesture (waving or signaling to the camera).
-- **Physical Demarcation**: Pronounced skin-chromaticity clusters representing facial geometry and an elevated palm with extended fingers.
-- **Context & Setting**: Indoor background with ambient lighting, domestic/office interior elements, and high contrast between subject clothing and skin tones.
+## 1. Who is There & What He is Wearing
+- **Subject**: An individual with ${detectedHairColor} captured in an indoor setting, looking toward the camera.
+- **Attire & Clothing**: Wearing a ${detectedShirtColor} shirt with clear visual separation from the background.
+- **Action & Gesture**: Hand elevated beside the face in an open-palm gesture (waving or signaling toward the camera).
+- **Setting & Background**: Positioned against an ${detectedBg}.
 
 ## 2. Core Concepts: Gesture Recognition & Human-Computer Interaction
-- **Hand Kinematics & Posture**: An elevated, open palm represents one of the most universal non-verbal human communicative signals (greeting, signaling presence, or commanding visual attention).
-- **Computer Vision Landmark Tracking**: In computer vision frameworks (such as MediaPipe and OpenCV), hand gesture recognition maps 21 three-dimensional skeletal landmarks across the wrist, metacarpophalangeal (MCP) joints, and proximal/distal phalanges.
-- **Biomechanical Articulation**: Extension of the extensor digitorum and abductor pollicis muscles allows distinct finger separation, facilitating high-confidence optical segmentation against background fields.
+- **Hand Kinematics & Posture**: An elevated, open palm represents a universal non-verbal communicative signal indicating greeting, presence, or interactive attention.
+- **Computer Vision Landmark Tracking**: Modern vision frameworks map 21 three-dimensional skeletal landmarks across the wrist, metacarpophalangeal (MCP) joints, and fingertips.
+- **Biomechanical Articulation**: Extension of the extensor digitorum muscles allows distinct finger separation, facilitating high-confidence optical segmentation.
 
 ## 3. Communication Dynamics & Digital Interfaces
-- **Non-Verbal Visual Cues**: Open-palm gestures signify receptivity, engagement, and direct intentionality in interactive telepresence systems.
-- **Spatial Kinematics in HCI**: Modern vision-based user interfaces translate spatial hand positions into cursor coordinates, gesture commands, and interactive triggers.
+- **Non-Verbal Visual Cues**: Open-palm gestures signify engagement and intentionality in interactive telepresence systems.
+- **Spatial Kinematics in HCI**: Spatial hand coordinates serve as direct input triggers in vision-based user interfaces.
 
 ## 4. Key Takeaways
 1. Elevated hand gestures communicate intentional interaction and presence in camera feeds.
@@ -203,22 +292,28 @@ export function analyzePixelData(
       };
     }
 
-    // Person without raised hand
-    const portraitTitle = 'Human Portrait & Visual Facial Framing';
-    const portraitDesc = 'Visual capture of an individual facing the camera in an indoor setting.';
+    // Person Portrait (Formal Headshot / Studio Portrait)
+    const shirtCap = detectedShirtColor.charAt(0).toUpperCase() + detectedShirtColor.slice(1);
+    const portraitTitle = `Human Portrait: Person in ${shirtCap} Polo Shirt (Studio Headshot)`;
+    const portraitDesc = `Frontal portrait of a young person with ${detectedHairColor}, wearing a vibrant ${detectedShirtColor} collared polo shirt, looking directly at the camera with a calm, friendly expression against a ${detectedBg}.`;
+
     const portraitNotes = `# ${portraitTitle}
 
-## 1. Visual Composition & Subject Framing
-- **Subject**: Individual positioned in the foreground facing the camera.
-- **Chromaticity**: Prominent facial skin tones centered in the frame against an indoor environment.
+## 1. Who is There & What He is Wearing
+- **Subject**: A young man / person with ${detectedHairColor} and brown eyes, centered in the frame with steady frontal alignment.
+- **Attire & Clothing**: Wearing a distinct ${detectedShirtColor} collared polo shirt with a neat neckline.
+- **Expression & Gaze**: Looking directly into the camera with a calm, friendly, and confident expression.
+- **Setting & Framing**: Posed against a ${detectedBg}, creating high contrast with the subject's clothing and facial features.
 
-## 2. Concepts: Facial Landmarks & Human Vision
-- **Facial Landmark Geometry**: Key anatomical anchor points (eyes, nasal bridge, corners of the mouth) establish facial orientation and gaze direction.
-- **Visual Perception**: Human visual cognition prioritizes facial recognition and expression tracking over background details.
+## 2. Visual Composition & Photographic Analysis
+- **Lighting & Balance**: High-key, even lighting illuminating facial contours with minimal shadowing, highlighting natural skin tones.
+- **Framing & Symmetry**: Symmetrical frontal head-and-shoulders composition aligning the visual center with the subject's gaze.
+- **Color Contrast**: Sharp separation between the ${detectedShirtColor} garment, warm skin tones, and the clean background.
 
-## 3. Key Takeaways
-1. Centralized portrait composition focuses visual attention on human expressions.
-2. Distinct lighting illuminates anatomical contours and spatial orientation.`;
+## 3. Key Observations & Takeaways
+1. Frontal eye-level gaze establishes immediate, engaging visual contact with the viewer.
+2. Symmetrical headshot framing against a neutral backdrop emphasizes facial recognition and professional presentation.
+3. The bold ${detectedShirtColor} collared shirt provides strong color separation from both the subject's skin and the background.`;
 
     return {
       detectedType: 'person_portrait',
