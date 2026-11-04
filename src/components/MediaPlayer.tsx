@@ -68,9 +68,9 @@ export function MediaPlayer({
   const currentSpeakingIdxRef = useRef<number>(-1);
 
   // Effective transcript segments with fallback for raw explanation text
-  const segments = artifact.transcript?.segments || [];
+  const transcriptSegments = artifact.transcript?.segments;
   const effectiveSegments = useMemo(() => {
-    if (segments.length > 0) return segments;
+    if (transcriptSegments && transcriptSegments.length > 0) return transcriptSegments;
     const fallbackText = (artifact.overview || artifact.title || 'Lecture explanation').trim();
     return [
       {
@@ -80,7 +80,7 @@ export function MediaPlayer({
         text: fallbackText,
       },
     ];
-  }, [segments, artifact.overview, artifact.title]);
+  }, [transcriptSegments, artifact.overview, artifact.title]);
 
   const hasTimestamps = artifact.transcript?.hasTimestamps ?? true;
   const totalSeconds =
@@ -124,11 +124,13 @@ export function MediaPlayer({
       window.speechSynthesis.cancel();
     }
     currentSpeakingIdxRef.current = -1;
-    setIsSpeakingNow(false);
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
+    setTimeout(() => {
+      setIsSpeakingNow(false);
+    }, 0);
   }, []);
 
   // Speak a specific segment by index with full audio output and smooth progress tracking
@@ -593,7 +595,7 @@ export function MediaPlayer({
                 Interactive Transcript
               </span>
               <span className="text-[11px] font-mono text-slate-500">
-                ({segments.length} Segments)
+                ({effectiveSegments.length} Segments)
               </span>
 
               {!hasTimestamps && (

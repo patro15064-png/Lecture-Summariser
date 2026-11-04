@@ -14,8 +14,7 @@ import {
   Maximize2, 
   Minimize2,
   Code2,
-  Play,
-  RotateCcw
+  Play
 } from 'lucide-react';
 
 export type BackgroundTheme = 
@@ -66,7 +65,7 @@ export interface InteractiveBackgroundStudioProps {
   showOverlayInitially?: boolean;
 }
 
-export interface SynthlyWorkspaceProps extends InteractiveBackgroundStudioProps {}
+export type SynthlyWorkspaceProps = InteractiveBackgroundStudioProps;
 
 /**
  * Default Circular Synthly Logo:
@@ -797,6 +796,8 @@ export default function WorkspacePage() {
  * Pure Ambient Background Canvas for the Main App:
  * Automatically synchronizes with the studio theme chosen by the user in localStorage.
  */
+const emptySubscribe = () => () => {};
+
 export function AppDynamicBackground({
   className = '',
   intensity = 1.0,
@@ -804,7 +805,7 @@ export function AppDynamicBackground({
   className?: string;
   intensity?: number;
 }) {
-  const [mounted, setMounted] = useState(false);
+  const mounted = React.useSyncExternalStore(emptySubscribe, () => true, () => false);
   const [theme, setTheme] = useState<BackgroundTheme>(() => getStoredStudioTheme());
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -815,10 +816,6 @@ export function AppDynamicBackground({
     targetY: 0,
     radius: 180,
   });
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   // Listen for storage or studio theme change events
   useEffect(() => {
