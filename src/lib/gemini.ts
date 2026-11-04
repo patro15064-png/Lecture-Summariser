@@ -459,7 +459,53 @@ function generateContextualChatFallback(
 
   const timestampTag = `[${matchedConcept.timestampFormatted}]`;
 
-  // 1. Direct answer if user mentions audio, narrator, voice, or playback
+  // 1. Casual / Normal conversation requests
+  if (
+    lowerMsg.includes('talk normally') ||
+    lowerMsg.includes('speak normally') ||
+    lowerMsg.includes('talk to you normally') ||
+    lowerMsg.includes('chat normally') ||
+    lowerMsg.includes('like a human') ||
+    lowerMsg.includes('be normal') ||
+    lowerMsg.includes('casual')
+  ) {
+    return `Absolutely! Let's talk normally. No robotic scripts or canned templates here—I'm right here with you. What would you like to discuss about this material, or what's on your mind?`;
+  }
+
+  // 2. Greetings & Introductions
+  if (/^(hi|hello|hey|greetings|good\s*(morning|afternoon|evening)|yo|sup)\b/i.test(lowerMsg)) {
+    return `Hello! Great to connect with you. I've analyzed your material on "${artifact.title}". Feel free to ask me anything about it in plain words, discuss what's in the photo or notes, or ask for a simpler breakdown. How can I help you today?`;
+  }
+
+  // 3. Thank you / Acknowledgments
+  if (/^(thank|thanks|appreciate it|cool|awesome|great|got it|ok|okay)\b/i.test(lowerMsg)) {
+    return `You're very welcome! If any other questions come up about this topic or anything in your study kit, just ask. I'm here anytime!`;
+  }
+
+  // 4. Who is in the photo / What is he wearing / Visual content queries
+  if (
+    lowerMsg.includes('who is') ||
+    lowerMsg.includes('what is he wearing') ||
+    lowerMsg.includes('what are they wearing') ||
+    lowerMsg.includes('how is he looking') ||
+    lowerMsg.includes('how does he look') ||
+    lowerMsg.includes('what is happening') ||
+    lowerMsg.includes('describe the photo') ||
+    lowerMsg.includes('describe the picture') ||
+    lowerMsg.includes('what is in the photo')
+  ) {
+    const firstConcept = concepts[0];
+    const explanation = firstConcept?.explanation || artifact.overview || 'Detailed visual portrait capture.';
+    return `Looking at the visual content in "${artifact.title}":
+
+${explanation}
+
+${firstConcept?.summary ? `> **Summary:** ${firstConcept.summary}` : ''}
+
+Is there any specific detail in the photo you'd like to discuss or learn more about?`;
+  }
+
+  // 5. Direct answer if user mentions audio, narrator, voice, or playback
   if (lowerMsg.includes('text') || lowerMsg.includes('audio') || lowerMsg.includes('voice') || lowerMsg.includes('read') || lowerMsg.includes('play')) {
     return `Yes! This study session includes a synchronized **AI Voice Narrator**.
 You can click **Play** at ${timestampTag} in the player above, and the browser will read each concept line aloud while highlighting the transcript in sync.
@@ -473,22 +519,20 @@ ${mode === 'socratic'
 }`;
   }
 
-  // 2. Analogy / Intuition request
+  // 6. Analogy / Intuition request
   if (lowerMsg.includes('analogy') || lowerMsg.includes('simple') || lowerMsg.includes('intuition') || lowerMsg.includes('explain')) {
     return `Here is an intuitive way to understand **${matchedConcept.title}** ${timestampTag}:
 
-Think of this like a coordinated physical system: rather than functioning in isolation, every step actively influences the downstream state.
-At ${timestampTag}, the lecture establishes:
-> "${matchedConcept.summary}"
+${matchedConcept.summary}
 
 ${matchedConcept.formulaLatex ? `The mathematical formulation is:\n\`\`\`latex\n${matchedConcept.formulaLatex}\n\`\`\`\n` : ''}
 ${mode === 'socratic'
-  ? `If you were to adjust the boundary inputs, how do you predict the outcome would shift? Click ${timestampTag} to review the audio!`
+  ? `Does this intuition help connect it back to the rest of ${artifact.title}? Feel free to click ${timestampTag} to listen along!`
   : matchedConcept.explanation
 }`;
   }
 
-  // 3. Misconceptions, errors, traps
+  // 7. Misconceptions, errors, traps
   if (lowerMsg.includes('mistake') || lowerMsg.includes('trap') || lowerMsg.includes('quiz') || lowerMsg.includes('wrong') || lowerMsg.includes('error')) {
     const diag = artifact.diagnosticQuestions?.[0];
     const trapOpt = diag?.options?.find((o) => !o.isCorrect);
@@ -499,18 +543,18 @@ ${trapOpt ? `> Many students incorrectly assume: *"${trapOpt.text}"*\n\n**Why th
 You can test yourself on this in the **Diagnostic Quizzes** tab or jump directly to ${timestampTag} in the player!`;
   }
 
-  // 4. Default dynamic pedagogical response
-  return `Regarding your question about **${matchedConcept.title}** ${timestampTag}:
+  // 8. Natural dynamic pedagogical response (No robotic prefixes or boilerplate!)
+  return `Regarding **${matchedConcept.title}** ${timestampTag}:
 
 ${matchedConcept.explanation}
 
+${matchedConcept.summary ? `In simple terms: *${matchedConcept.summary}*` : ''}
+
 ${matchedConcept.formulaLatex ? `**Key Formulation:**\n\`\`\`latex\n${matchedConcept.formulaLatex}\n\`\`\`\n` : ''}
-**Core Takeaway:**
-${matchedConcept.keyTakeaways?.map((t) => `• ${t}`).join('\n') || matchedConcept.summary}
 
 ${mode === 'socratic'
-  ? `How would you connect this principle back to the central thesis of ${artifact.title}? Jump to ${timestampTag} to explore further!`
-  : `Jump to ${timestampTag} in the player above to follow along with the narration!`
+  ? `Does this make sense, or would you like to break it down further with an everyday analogy?`
+  : `Let me know if you'd like to explore any specific part of this in more detail!`
 }`;
 }
 

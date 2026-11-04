@@ -18,6 +18,7 @@ import {
   BookOpen
 } from 'lucide-react';
 import { LectureArtifact, UserApiSettings } from '@/types/lecture';
+import { loadUserApiSettings } from '@/lib/providerSettings';
 
 interface SocraticChatProps {
   artifact: LectureArtifact;
@@ -126,31 +127,32 @@ Ask me anything about this lecture! Whenever I reference a concept, I will inclu
         }));
 
       // Find active provider and key from settings
+      const resolvedSettings = settings || loadUserApiSettings();
       let provider = 'gemini';
       let activeKey = apiKey || '';
       let activeModel: string | undefined;
       let activeBaseUrl: string | undefined;
 
-      if (settings) {
-        if (settings.useSingleModel) {
-          provider = settings.singleProvider;
-          activeKey = settings.providers[settings.singleProvider]?.apiKey || '';
-          activeModel = settings.singleModel || settings.providers[settings.singleProvider]?.defaultModel;
-          activeBaseUrl = settings.providers[settings.singleProvider]?.baseUrl;
+      if (resolvedSettings) {
+        if (resolvedSettings.useSingleModel) {
+          provider = resolvedSettings.singleProvider;
+          activeKey = activeKey || resolvedSettings.providers[resolvedSettings.singleProvider]?.apiKey || '';
+          activeModel = resolvedSettings.singleModel || resolvedSettings.providers[resolvedSettings.singleProvider]?.defaultModel;
+          activeBaseUrl = resolvedSettings.providers[resolvedSettings.singleProvider]?.baseUrl;
         } else {
-          const chatAssignment = settings.assignments?.chat;
-          if (chatAssignment && settings.providers[chatAssignment.provider]?.apiKey?.trim()) {
+          const chatAssignment = resolvedSettings.assignments?.chat;
+          if (chatAssignment && resolvedSettings.providers[chatAssignment.provider]?.apiKey?.trim()) {
             provider = chatAssignment.provider;
-            activeKey = settings.providers[chatAssignment.provider]?.apiKey?.trim() || '';
-            activeModel = chatAssignment.model || settings.providers[chatAssignment.provider]?.defaultModel;
-            activeBaseUrl = settings.providers[chatAssignment.provider]?.baseUrl;
+            activeKey = activeKey || resolvedSettings.providers[chatAssignment.provider]?.apiKey?.trim() || '';
+            activeModel = chatAssignment.model || resolvedSettings.providers[chatAssignment.provider]?.defaultModel;
+            activeBaseUrl = resolvedSettings.providers[chatAssignment.provider]?.baseUrl;
           } else {
-            const providersList: Array<keyof typeof settings.providers> = ['gemini', 'openai', 'groq', 'openrouter', 'anthropic', 'custom'];
+            const providersList: Array<keyof typeof resolvedSettings.providers> = ['gemini', 'openai', 'groq', 'openrouter', 'anthropic', 'custom'];
             for (const p of providersList) {
-              const cfg = settings.providers[p];
+              const cfg = resolvedSettings.providers[p];
               if (cfg?.apiKey?.trim()) {
                 provider = p;
-                activeKey = cfg.apiKey.trim();
+                activeKey = activeKey || cfg.apiKey.trim();
                 activeModel = cfg.defaultModel;
                 activeBaseUrl = cfg.baseUrl;
                 break;
