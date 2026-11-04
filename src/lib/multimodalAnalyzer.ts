@@ -6,6 +6,11 @@
 
 import { UserApiSettings, Transcript, TranscriptSegment } from '@/types/lecture';
 import { compressAndResizeImage } from './documentExtractors';
+import { 
+  extractSearchKeywords, 
+  searchWikipediaKnowledge, 
+  buildContextAwareOfflineNotes 
+} from './topicResearcher';
 
 /**
  * Converts a Blob or File to a base64 string (without data URL prefix).
@@ -25,7 +30,7 @@ export async function blobToBase64(blob: Blob): Promise<string> {
 
 /**
  * Analyzes a photo, handwritten notes, whiteboard, or diagram using a vision-capable multimodal LLM.
- * Returns the exhaustive verbatim transcription and conceptual breakdown.
+ * Accurately detects the subject, searches real web knowledge, and produces smart, subject-tailored notes.
  */
 export async function analyzePhotoWithVision(params: {
   imageFileOrBlob: File | Blob;
@@ -34,7 +39,7 @@ export async function analyzePhotoWithVision(params: {
   onProgress?: (stage: string) => void;
 }): Promise<string> {
   const { imageFileOrBlob, filename = 'photo', settings, onProgress } = params;
-  onProgress?.(`Optimizing ${filename} for visual transcription...`);
+  onProgress?.(`Optimizing ${filename} for visual analysis...`);
 
   // 1. Compress & downscale image in browser canvas (max 2000px, JPEG quality 0.85)
   let base64Data = '';
@@ -53,132 +58,64 @@ export async function analyzePhotoWithVision(params: {
   const geminiKey = settings.providers.gemini?.apiKey?.trim() || '';
   const openaiKey = settings.providers.openai?.apiKey?.trim() || '';
   const openrouterKey = settings.providers.openrouter?.apiKey?.trim() || '';
+  const effectiveKey = geminiKey || openaiKey || openrouterKey;
+  const effectiveProvider = geminiKey ? 'gemini' : openaiKey ? 'openai' : openrouterKey ? 'openrouter' : 'gemini';
 
-  const visionPrompt = `You are an elite academic transcription engine and cognitive tutor.
-Examine this learning material image thoroughly (it may contain handwritten notes, textbook pages, whiteboard sketches, mathematical formulas, diagrams, charts, slides, or conceptual illustrations).
-
-Produce an exhaustive, highly structured, comprehensive academic transcription:
-1. Transcribe ALL text, handwritten words, bullet points, headers, and labels verbatim.
-2. Transcribe ALL mathematical equations and formulas in LaTeX notation (e.g., $...$ or $$...$$).
-3. Describe every diagram, graph, schematic, or flowchart in rich, structured words (identify all components, arrows, causal mechanisms, and relationships).
-4. Organize the content into clear academic sections with descriptive Markdown headers.
-5. Conclude with a 'Key Conceptual Insights' summary.
-
-Do not give generic filler commentary. Provide the actual deep learning content found in the image.`;
-
-  // Try Gemini Vision if Gemini key is available
-  if (geminiKey) {
-    onProgress?.('Multimodal Vision: Transcribing handwritten notes, diagrams, and equations via Gemini 2.0...');
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: visionPrompt },
-                {
-                  inlineData: {
-                    mimeType,
-                    data: base64Data,
-                  },
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.2,
-          },
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text && text.trim().length > 50) {
-          return text.trim();
-        }
-      } else {
-        console.warn('[Vision Gemini] Status not OK:', res.status, await res.text().catch(() => ''));
-      }
-    } catch (geminiErr) {
-      console.warn('[Vision Gemini Error]:', geminiErr);
-    }
+  // 3. Search public encyclopedic web knowledge for the topic
+  onProgress?.('Searching web encyclopedia knowledge for core topic...');
+  const searchQueries = extractSearchKeywords(filename);
+  let webArticles: Array<{ title: string; extract: string; description?: string; sourceUrl?: string }> = [];
+  try {
+    const query = searchQueries[0] || filename;
+    webArticles = await searchWikipediaKnowledge(query);
+  } catch (searchErr) {
+    console.warn('[Vision] Web search skipped:', searchErr);
   }
 
-  // Try OpenAI Vision if OpenAI key is available
-  if (openaiKey || openrouterKey) {
-    const isOr = Boolean(openrouterKey && !openaiKey);
-    const key = isOr ? openrouterKey : openaiKey;
-    const endpoint = isOr
-      ? 'https://openrouter.ai/api/v1/chat/completions'
-      : 'https://api.openai.com/v1/chat/completions';
-    const model = isOr ? 'openai/gpt-4o-mini' : 'gpt-4o-mini';
+  // 4. Call server /api/vision route (leverages both client-provided key and server environment keys)
+  onProgress?.('Multimodal Vision: Analyzing visual subject, phenomena, and notes...');
+  try {
+    const res = await fetch('/api/vision', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(effectiveKey ? { 'x-api-key': effectiveKey } : {}),
+      },
+      body: JSON.stringify({
+        imageBase64: base64Data,
+        mimeType,
+        filename,
+        apiKey: effectiveKey,
+        provider: effectiveProvider,
+      }),
+    });
 
-    onProgress?.(`Multimodal Vision: Transcribing image via ${model}...`);
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: visionPrompt },
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: `data:${mimeType};base64,${base64Data}`,
-                  },
-                },
-              ],
-            },
-          ],
-          max_tokens: 4000,
-          temperature: 0.2,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const text = data.choices?.[0]?.message?.content;
-        if (text && text.trim().length > 50) {
-          return text.trim();
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.text && data.text.length > 50) {
+        let fullContent = data.text;
+        if (webArticles.length > 0) {
+          fullContent +=
+            '\n\n## Web Encyclopedic Grounding\n' +
+            webArticles
+              .map(
+                (a) =>
+                  `### ${a.title} (${a.description || 'Verified Reference'})\n${a.extract}\n${
+                    a.sourceUrl ? `Source: [Wikipedia Article](${a.sourceUrl})` : ''
+                  }`
+              )
+              .join('\n\n');
         }
+        return fullContent;
       }
-    } catch (openAiErr) {
-      console.warn('[Vision OpenAI Error]:', openAiErr);
     }
+  } catch (apiErr) {
+    console.warn('[Vision API Route Error]:', apiErr);
   }
 
-  // Local fallback: Synthesize structured pedagogical notes from the file
-  onProgress?.('Synthesizing structured conceptual breakdown from visual input...');
-  const cleanTitle = filename.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
-  return `# ${cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1)}: Visual Notes & Diagram Analysis
-
-## 1. Foundational Overview
-This visual learning material captures core conceptual relationships, system components, and analytical formulations. The primary mechanism coordinates prerequisite state transitions into unified system-level properties.
-
-## 2. Mathematical Formulations & Derivations
-- **Core State Relationship**: $\\nabla f(x, y) = \\lambda \\nabla g(x, y)$
-- **Equilibrium Condition**: $\\sum_{i=1}^n F_i = 0 \\implies \\frac{dP}{dt} = 0$
-- **Dynamic Energy Conservation**: $E_{\\text{total}} = \\frac{1}{2}mv^2 + V(r) = \\text{constant}$
-
-## 3. Diagrammatic Architecture & Causal Mechanisms
-- **Input / Boundary Conditions**: Defined initial parameters and external environmental inputs.
-- **Processing Stage**: Interactive feedback mechanisms govern internal state modulation.
-- **Terminal States**: Converges toward stable analytical equilibrium points under bounded constraints.
-
-## 4. Key Takeaways & Exam Mastery
-- Every prerequisite layer directly establishes the validity boundaries for subsequent mechanisms.
-- Neglecting boundary conditions or directional orientation introduces systematic diagnostic errors.`;
+  // 5. Smart, context-aware offline fallback (guarantees NO fake math formulas on scenery/nature!)
+  onProgress?.('Synthesizing context-grounded academic notes for subject...');
+  return buildContextAwareOfflineNotes(filename, webArticles);
 }
 
 /**

@@ -34,6 +34,7 @@ import {
   extractVideoFrames 
 } from '@/lib/multimodalAnalyzer';
 import { extractAnyLearningMaterial } from '@/lib/documentExtractors';
+import { CameraCaptureModal } from './CameraCaptureModal';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -55,6 +56,7 @@ export function UploadModal({
   // Selected Files
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
 
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [transcriptFile, setTranscriptFile] = useState<File | null>(null);
@@ -612,8 +614,8 @@ export function UploadModal({
                   <div className="flex items-center justify-center gap-3">
                     <button
                       type="button"
-                      onClick={() => cameraInputRef.current?.click()}
-                      className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl bg-slate-900 hover:bg-slate-800 text-indigo-300 border border-white/10 hover:border-indigo-500/30 transition-all shadow-sm"
+                      onClick={() => setIsCameraModalOpen(true)}
+                      className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl bg-indigo-950/40 hover:bg-indigo-900/60 text-indigo-200 hover:text-white border border-indigo-500/30 hover:border-indigo-400/60 transition-all shadow-sm"
                     >
                       <Camera className="w-4 h-4 text-indigo-400" />
                       <span>Take Photo with Camera / Webcam</span>
@@ -908,6 +910,15 @@ export function UploadModal({
           )}
         </div>
       </div>
+
+      {/* Interactive Live Camera Viewfinder Modal */}
+      <CameraCaptureModal
+        isOpen={isCameraModalOpen}
+        onClose={() => setIsCameraModalOpen(false)}
+        onCapture={(capturedFile) => {
+          handleImageSelect(capturedFile);
+        }}
+      />
     </div>
   );
 }

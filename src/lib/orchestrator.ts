@@ -429,7 +429,8 @@ export function generateLocalAgentResponse(
       const quoteWords = words.slice(0, Math.min(words.length, Math.max(5, Math.floor(words.length * 0.6))));
       const verbatimQuote = quoteWords.join(' ') || item.text.slice(0, 60);
 
-      const hasMath = /[=+\-*/\\]/.test(item.text) && /(derivative|integral|vector|formula|equation)/i.test(item.text);
+      const mathMatch = item.text.match(/\$([^$]+)\$/);
+      const hasMath = Boolean(mathMatch) || (/[=]/.test(item.text) && /(derivative|integral|vector|formula|equation)/i.test(item.text));
       const isDefinition = /(is a|is defined as|refers to|means)/i.test(item.text);
 
       const type = hasMath ? 'equation' : isDefinition ? 'definition' : 'core';
@@ -441,7 +442,7 @@ export function generateLocalAgentResponse(
         approxTimestampSeconds: item.timeSec,
         summary: item.text.length > 130 ? item.text.slice(0, 127) + '...' : item.text,
         explanation: `In this section, the material emphasizes: "${verbatimQuote}". This concept represents a foundational milestone in understanding the overall topic.`,
-        formulaLatex: hasMath ? '\\nabla f = (\\partial f / \\partial x, \\partial f / \\partial y)' : undefined,
+        formulaLatex: mathMatch ? mathMatch[1].trim() : undefined,
         verbatimQuote,
         keyTakeaways: [
           `Explicit focus: ${verbatimQuote.slice(0, 60)}`,

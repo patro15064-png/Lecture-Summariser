@@ -120,7 +120,7 @@ Your JSON output MUST match this exact schema:
       "timestampFormatted": "02:00",
       "summary": "One sentence elevator summary.",
       "explanation": "Detailed 2-3 paragraph pedagogical explanation.",
-      "formulaLatex": "\\\\nabla f = \\\\lambda \\\\nabla g",
+      "formulaLatex": null,
       "prerequisites": [],
       "keyTakeaways": ["Key takeaway 1", "Key takeaway 2", "Key takeaway 3"],
       "importance": "foundational"
@@ -175,6 +175,7 @@ CRITICAL RULES:
 1. ONLY return valid JSON. Do not wrap in backticks if possible, or wrap strictly in \`\`\`json.
 2. In 'mermaidGraph', use simple IDs (N1, N2) with double-quoted labels [\\"Label\\"]. Avoid unescaped brackets or parentheses inside labels.
 3. Every incorrect option in 'diagnosticQuestions' MUST explain the specific cognitive trap in 'misconceptionExplanation'.
+4. STRICT DOMAIN FIDELITY: Only include 'formulaLatex' if the material explicitly teaches mathematics, physics, statistics, or quantitative formulas. For scenery, nature, art, biology, history, literature, or non-mathematical topics, set 'formulaLatex' to null. NEVER invent calculus or unrelated formulas.
 `;
 
 export async function processLectureWithGemini(params: {
