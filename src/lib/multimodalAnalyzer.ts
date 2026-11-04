@@ -323,11 +323,15 @@ export async function generateSpokenAudioLecture(params: {
   const geminiKey = settings.providers.gemini?.apiKey?.trim() || '';
   const openaiKey = settings.providers.openai?.apiKey?.trim() || '';
 
-  const lecturePrompt = `You are a world-class academic lecturer.
+  const lecturePrompt = `You are a world-class academic lecturer and visual analyst.
 Convert the following study material into an engaging, natural spoken pedagogical audio lecture.
 Structure the lecture into 4 to 6 clear chronological parts.
+
+CRITICAL REQUIREMENT:
+Part 1 MUST ALWAYS focus on "What is Happening in the Image / Scene": describe who or what is present, what they are wearing, their expressions, gestures, what action is taking place, and the setting.
+
 For EVERY part, provide:
-1. "title": descriptive section title
+1. "title": descriptive section title (e.g. "Part 1: What is Happening in the Scene")
 2. "speechText": 2-4 rich sentences written in an engaging, natural speaking style that an AI voice narrator will read aloud to teach the student.
 3. "durationSeconds": estimated duration in seconds (between 25 and 40 seconds per part).
 
@@ -338,7 +342,7 @@ Return STRICT JSON ONLY with schema:
 {
   "sections": [
     {
-      "title": "Part 1: Foundational Overview",
+      "title": "Part 1: What is Happening in the Scene",
       "speechText": "Spoken explanation...",
       "durationSeconds": 30
     }
@@ -414,17 +418,24 @@ ${rawContent.slice(0, 16000)}`;
       .filter((p) => p.length > 30 && !isMeaninglessFilename(p));
 
     const parts = rawParagraphs.length >= 3 ? rawParagraphs.slice(0, 6) : [
-      `Welcome to this visual learning session on ${cleanTitle}. Today we examine the core structure, essential components, and key insights of this visual material.`,
+      `In this visual learning session on ${cleanTitle}, we first examine what is happening in the scene: the primary visual subjects, actions, and environmental context.`,
       `Examining the primary subject elements and layout reveals the central design and conceptual relationships.`,
       `Notice how the visual hierarchy and contrast delineate the most critical concepts for clear understanding.`,
       `Finally, synthesizing these foundational observations provides a grounded mental model for lasting mastery.`,
     ];
 
-    generatedSections = parts.map((text, idx) => ({
-      title: `Part ${idx + 1}: ${text.slice(0, 35)}...`,
-      speechText: text,
-      durationSeconds: Math.max(25, Math.min(45, Math.round(text.split(' ').length / 2.5))),
-    }));
+    generatedSections = parts.map((text, idx) => {
+      let sectionTitle = `Part ${idx + 1}: ${text.slice(0, 35)}...`;
+      const headerMatch = text.match(/^(\d+\.\s*[^:\n]+)/);
+      if (headerMatch && headerMatch[1]) {
+        sectionTitle = headerMatch[1].trim();
+      }
+      return {
+        title: sectionTitle,
+        speechText: text,
+        durationSeconds: Math.max(25, Math.min(45, Math.round(text.split(' ').length / 2.5))),
+      };
+    });
   }
 
   // Construct timed segments with continuous cumulative seconds

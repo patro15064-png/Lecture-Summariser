@@ -66,4 +66,15 @@ test('Natural Chat Conversation Suite', async (t) => {
     assert.match(reply, /royal blue/i);
     assert.match(reply, /short dark hair/i);
   });
+
+  await t.test('directly explains what is happening when user asks why doesnt it first talk about what is happening', async () => {
+    const reply = await chatWithLecture({
+      message: 'Why doesnt it first talk about what is happening in photo',
+      artifact: mockArtifact,
+    });
+
+    assert.doesNotMatch(reply, /Regarding your question about/i);
+    assert.match(reply, /what is happening in/i);
+    assert.match(reply, /royal blue|short dark hair/i);
+  });
 });

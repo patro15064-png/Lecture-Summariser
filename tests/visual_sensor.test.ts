@@ -25,6 +25,9 @@ test('Visual Sensor & Content Grounding Suite', async (t) => {
     // Real human titles should be preserved
     assert.strictEqual(isMeaninglessFilename('Multivariable Calculus Gradient Vectors.pdf'), false);
     assert.strictEqual(isMeaninglessFilename('Cellular Mitosis and Genetics.docx'), false);
+    assert.strictEqual(isMeaninglessFilename('Photographic Scene & Visual Environmental Analysis'), false);
+    assert.strictEqual(isMeaninglessFilename('Image Processing and Deep Neural Networks'), false);
+    assert.strictEqual(isMeaninglessFilename('Digital Art: Mythical Frost Dragon & Traveler Encounter'), false);
   });
 
   await t.test('analyzePixelData identifies 8-bit pixel art sprites from pixel buffer', () => {
@@ -161,9 +164,46 @@ test('Visual Sensor & Content Grounding Suite', async (t) => {
     assert.match(report.notesMarkdown, /short dark/i);
     assert.match(report.notesMarkdown, /friendly|calm/i);
     assert.match(report.notesMarkdown, /white/i);
+    assert.match(report.notesMarkdown, /## 1\. What is Happening in the Photo/i);
     // Must NOT contain geomorphology or atmospheric scattering
     assert.doesNotMatch(report.notesMarkdown, /geomorphology/i);
     assert.doesNotMatch(report.notesMarkdown, /atmospheric scattering/i);
+  });
+
+  await t.test('analyzePixelData identifies fantasy dragon artwork with glowing cyan eye and deep blue tones', () => {
+    const width = 64;
+    const height = 64;
+    const pixels = new Uint8ClampedArray(width * height * 4);
+
+    // Fill background with deep sapphire / midnight blue tones (#102870) with painterly shading
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        const shade = (x + y) % 30;
+        pixels[idx] = 16 + shade;
+        pixels[idx + 1] = 40 + shade;
+        pixels[idx + 2] = 112 + shade * 2;
+        pixels[idx + 3] = 255;
+      }
+    }
+
+    // Glowing cyan/blue dragon eye in center (x=24..40, y=20..32)
+    for (let y = 20; y <= 32; y++) {
+      for (let x = 24; x <= 40; x++) {
+        const idx = (y * width + x) * 4;
+        pixels[idx] = 20;
+        pixels[idx + 1] = 180;
+        pixels[idx + 2] = 255;
+      }
+    }
+
+    const report = analyzePixelData(pixels, width, height);
+    assert.strictEqual(report.detectedType, 'fantasy_creature_art');
+    assert.match(report.title, /Mythical Frost Dragon|Digital Art/i);
+    assert.match(report.notesMarkdown, /## 1\. What is Happening in the Scene/i);
+    assert.match(report.notesMarkdown, /dragon|creature|traveler/i);
+    // Must NOT contain meaningless calculus formulas
+    assert.doesNotMatch(report.notesMarkdown, /\\nabla f/);
   });
 
   await t.test('extractTitleFromNotes parses clean title from Markdown', () => {

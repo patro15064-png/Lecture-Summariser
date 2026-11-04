@@ -482,7 +482,26 @@ function generateContextualChatFallback(
     return `You're very welcome! If any other questions come up about this topic or anything in your study kit, just ask. I'm here anytime!`;
   }
 
-  // 4. Who is in the photo / What is he wearing / Visual content queries
+  // 4. "Why doesn't it first talk about what is happening in photo" query
+  if (
+    lowerMsg.includes('why doesnt it') ||
+    lowerMsg.includes("why doesn't it") ||
+    lowerMsg.includes('why does it not') ||
+    lowerMsg.includes('first talk about what is happening')
+  ) {
+    const firstConcept = concepts[0];
+    const explanation = firstConcept?.explanation || artifact.overview || 'Detailed visual capture analysis.';
+    return `Great point! The lecture structure and AI Voice Narrator have been updated so they ALWAYS lead immediately with what is happening in the photo right from the very first second [00:00].
+
+Here is what is happening in "${artifact.title}":
+${explanation}
+
+${firstConcept?.summary ? `> **Core Action & Subject:** ${firstConcept.summary}` : ''}
+
+Would you like to explore any specific character, creature, gesture, or setting detail in this scene?`;
+  }
+
+  // 5. Who is in the photo / What is he wearing / Visual content queries
   if (
     lowerMsg.includes('who is') ||
     lowerMsg.includes('what is he wearing') ||
@@ -505,7 +524,7 @@ ${firstConcept?.summary ? `> **Summary:** ${firstConcept.summary}` : ''}
 Is there any specific detail in the photo you'd like to discuss or learn more about?`;
   }
 
-  // 5. Direct answer if user mentions audio, narrator, voice, or playback
+  // 6. Direct answer if user mentions audio, narrator, voice, or playback
   if (lowerMsg.includes('text') || lowerMsg.includes('audio') || lowerMsg.includes('voice') || lowerMsg.includes('read') || lowerMsg.includes('play')) {
     return `Yes! This study session includes a synchronized **AI Voice Narrator**.
 You can click **Play** at ${timestampTag} in the player above, and the browser will read each concept line aloud while highlighting the transcript in sync.

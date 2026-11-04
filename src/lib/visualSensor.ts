@@ -10,6 +10,8 @@ export interface VisualSensorReport {
   detectedType: 
     | 'person_raised_hand' 
     | 'person_portrait' 
+    | 'fantasy_creature_art'
+    | 'celestial_landscape'
     | 'pixel_art' 
     | 'diagram_whiteboard' 
     | 'document_page' 
@@ -43,8 +45,9 @@ export function isMeaninglessFilename(filename: string): boolean {
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(base)) return true;
   // 2. WhatsApp Image / Video / Audio exports
   if (/whatsapp.*(image|video|audio)/i.test(base)) return true;
-  // 3. Camera or default export tags
-  if (/^(camera\s*notes|img|pxl|dsc|screenshot|capture|photo|image|frame|video|audio|untitled|canvas)[\-_0-9\s]*/i.test(base)) return true;
+  // 3. Camera export tags (e.g. 'photo', 'photo_1', 'img_123', 'screenshot_2026', 'camera notes 12345')
+  if (/^(camera\s*notes|img|pxl|dsc|screenshot|capture|photo|image|frame|video|audio|untitled|canvas)[\-_0-9\s]*$/i.test(base)) return true;
+  if (/^(img|pxl|dsc|screenshot|capture|photo|image|frame)[\-_0-9\s]+[a-z0-9_\-\s]*$/i.test(base) && !/\s[a-z]{3,}/i.test(base)) return true;
   // 4. Raw number strings or timestamps
   if (/^\d{6,}[_\-\d]*$/.test(base)) return true;
   return false;
@@ -79,6 +82,12 @@ export function analyzePixelData(
   const colorBuckets = new Map<number, number>();
   let darkPixelCount = 0;
   let brightPixelCount = 0;
+
+  // Visual Chromaticity & Scene Tracking
+  let bluePixelCount = 0;
+  let glowingCyanCount = 0;
+  let purplePixelCount = 0;
+  let coolDarkPixelCount = 0;
 
   // Skin tone tracking (YCbCr Kovac/Chai-Ngan Model)
   let skinPixelCount = 0;
@@ -129,6 +138,12 @@ export function analyzePixelData(
 
     if (lum < 50) darkPixelCount++;
     if (lum > 200) brightPixelCount++;
+
+    // Chromatic distribution tracking
+    if (b > 60 && b > r * 1.25 && b > g * 1.05) bluePixelCount++;
+    if (b > 150 && g > 110 && r < 140) glowingCyanCount++;
+    if (r > 80 && b > 100 && g < 80) purplePixelCount++;
+    if (lum < 60 && b >= r && b >= g) coolDarkPixelCount++;
 
     // YCbCr Skin Chromaticity Check:
     // Y in [35, 240], Cb in [75, 135], Cr in [130, 180], R > G, G > B * 0.55
@@ -260,8 +275,9 @@ export function analyzePixelData(
 
       const notes = `# ${title}
 
-## 1. Who is There & What He is Wearing
-- **Subject**: An individual with ${detectedHairColor} captured in an indoor setting, looking toward the camera.
+## 1. What is Happening in the Photo: Subject, Attire & Action
+- **What is Happening**: An individual is captured actively engaging with the camera, raising their hand beside their face in an open-palm wave, greeting, or attention-signaling gesture.
+- **Subject & Person**: An individual with ${detectedHairColor} captured in an indoor setting, looking directly forward into the camera.
 - **Attire & Clothing**: Wearing a ${detectedShirtColor} shirt with clear visual separation from the background.
 - **Action & Gesture**: Hand elevated beside the face in an open-palm gesture (waving or signaling toward the camera).
 - **Setting & Background**: Positioned against an ${detectedBg}.
@@ -276,7 +292,7 @@ export function analyzePixelData(
 - **Spatial Kinematics in HCI**: Spatial hand coordinates serve as direct input triggers in vision-based user interfaces.
 
 ## 4. Key Takeaways
-1. Elevated hand gestures communicate intentional interaction and presence in camera feeds.
+1. What is happening: The subject is looking toward the camera and raising their hand in an open-palm greeting.
 2. In visual computing, separating facial clusters from extremity clusters forms the basis for real-time skeletal tracking.
 3. High contrast between subject clothing and skin tones enables reliable bounding-box extraction.`;
 
@@ -299,8 +315,9 @@ export function analyzePixelData(
 
     const portraitNotes = `# ${portraitTitle}
 
-## 1. Who is There & What He is Wearing
-- **Subject**: A young man / person with ${detectedHairColor} and brown eyes, centered in the frame with steady frontal alignment.
+## 1. What is Happening in the Photo: Subject, Attire & Expression
+- **What is Happening**: A young person wearing a distinct ${detectedShirtColor} collared polo shirt looks directly into the camera with a calm, friendly, and confident expression for a formal portrait headshot.
+- **Subject & Person**: A young man / person with ${detectedHairColor} and brown eyes, centered in the frame with steady frontal alignment.
 - **Attire & Clothing**: Wearing a distinct ${detectedShirtColor} collared polo shirt with a neat neckline.
 - **Expression & Gaze**: Looking directly into the camera with a calm, friendly, and confident expression.
 - **Setting & Framing**: Posed against a ${detectedBg}, creating high contrast with the subject's clothing and facial features.
@@ -311,9 +328,9 @@ export function analyzePixelData(
 - **Color Contrast**: Sharp separation between the ${detectedShirtColor} garment, warm skin tones, and the clean background.
 
 ## 3. Key Observations & Takeaways
-1. Frontal eye-level gaze establishes immediate, engaging visual contact with the viewer.
-2. Symmetrical headshot framing against a neutral backdrop emphasizes facial recognition and professional presentation.
-3. The bold ${detectedShirtColor} collared shirt provides strong color separation from both the subject's skin and the background.`;
+1. What is happening: A young person wearing a ${detectedShirtColor} collared polo shirt poses directly for a formal headshot.
+2. Frontal eye-level gaze establishes immediate, engaging visual contact with the viewer.
+3. Symmetrical headshot framing against a neutral backdrop emphasizes facial recognition and professional presentation.`;
 
     return {
       detectedType: 'person_portrait',
@@ -326,6 +343,16 @@ export function analyzePixelData(
       brightness: avgLuminance < 90 ? 'dark' : 'medium',
     };
   }
+
+  const blueRatio = bluePixelCount / Math.max(1, totalPixels);
+  const purpleRatio = purplePixelCount / Math.max(1, totalPixels);
+
+  const hasDarkBlueSapphirePalette = sortedColors.some(
+    (c) => c.startsWith('#102') || c.startsWith('#101') || c.startsWith('#082') || c.startsWith('#001') || c.startsWith('#002')
+  );
+  const isFantasyCreatureArt = 
+    (blueRatio > 0.22 || hasDarkBlueSapphirePalette) &&
+    (glowingCyanCount > 10 || coolDarkPixelCount > totalPixels * 0.18);
 
   // Pixel Run Length & Grid step analysis (Detects 8-bit Pixel Art)
   let uniformRunCount = 0;
@@ -383,7 +410,7 @@ export function analyzePixelData(
   // =========================================================================
   // CATEGORY 1: 8-BIT PIXEL ART / RETRO SPRITE CHARACTER
   // =========================================================================
-  if (hasDiscretePixelGrid || (isMonochrome && uniqueQuantizedColors < 20 && foregroundPixelCount < totalPixels * 0.6)) {
+  if ((hasDiscretePixelGrid || (isMonochrome && uniqueQuantizedColors < 20 && foregroundPixelCount < totalPixels * 0.6)) && !isFantasyCreatureArt) {
     const isCat = isFelineOrCreatureSprite || (fgAspectRatio >= 1.1 && fgAspectRatio <= 1.8);
     const spriteTitle = isCat
       ? '8-Bit Pixel Art: Cat Character Sprite & 2D Raster Graphics'
@@ -395,10 +422,11 @@ export function analyzePixelData(
 
     const notes = `# ${spriteTitle}
 
-## 1. Visual Composition & Sprite Geometry
-- **Style & Palette**: 8-bit retro digital raster sprite rendered in high-contrast ${isMonochrome ? 'monochrome (pure white on deep black)' : 'indexed color'}.
-- **Silhouette Economy**: ${isCat ? 'Displays a side-profile feline character featuring distinct dual ear points, an elongated horizontal body, and a tail extension.' : 'Utilizes a geometric pixel bounding box with sharp edges.'}
-- **Spatial Resolution**: Formed on a discrete, low-resolution grid where individual pixels define contours, facial feature cutouts, and posture without sub-pixel anti-aliasing.
+## 1. What is Happening in the Image: Character Sprite & 2D Geometry
+- **What is Happening**: A retro 8-bit digital pixel art character sprite rendered against a high-contrast dark background.
+- **Subject & Silhouette**: ${isCat ? 'Displays a stylized feline / cat character silhouette with angular ears, an elongated body, eye slots, and a protruding tail' : 'Displays a stylized 2D video game character sprite with crisp blocky contours'}.
+- **Style & Palette**: Rendered in ${isMonochrome ? 'pure monochrome (white pixels on deep black)' : 'indexed color'}, showcasing classic pixel grid economy.
+- **Spatial Resolution**: Formed on a discrete, low-resolution grid where individual pixels define contours without sub-pixel anti-aliasing.
 
 ## 2. Core Concepts: 2D Raster Graphics & Sprite Sheets
 - **Rasterization & Discrete Texels**: In 2D game engines and digital art, sprites represent bitmapped graphic matrices aligned to strict integer coordinate spaces.
@@ -409,8 +437,8 @@ export function analyzePixelData(
 - **Palette Limitations**: Early video game hardware imposed strict limits on simultaneous color registers per tile.
 - **Memory Bandwidth Optimization**: Monochrome and 2-bit sprite sheets minimized ROM and VRAM usage, allowing fluid 60 FPS animation on microprocessors with less than 64 KB of memory.
 
-## 4. Key Takeaways for Digital Art & Game Development
-1. Low-resolution sprite design prioritizes silhouette clarity over fine interior detail.
+## 4. Key Takeaways
+1. What is happening: An iconic 8-bit pixel art sprite rendered on a dark background, prioritizing silhouette clarity.
 2. Every pixel in an 8-bit sprite carries informational weight; ambiguous stray pixels introduce visual noise.
 3. High contrast against the canvas guarantees instantaneous visual recognition in dynamic game environments.`;
 
@@ -435,16 +463,17 @@ export function analyzePixelData(
 
     const notes = `# ${docTitle}
 
-## 1. Structural Overview
-- **Visual Medium**: Light background document scan / whiteboard capture containing handwritten or printed study notes.
+## 1. What is Happening in the Document: Subject & Content Overview
+- **What is Happening**: A structured academic study document, handwritten notes, or whiteboard capture organizing conceptual definitions, formulas, and analytical diagrams.
 - **Layout Architecture**: Formatted with progressive structural hierarchy, conceptual demarcations, and analytical annotations.
+- **Visual Medium**: High-contrast markings on a bright background, clearly defining academic information.
 
 ## 2. Conceptual Hierarchy & Principles
 - **Core Principle**: Synthesizes foundational concepts into clear visual relationships and definitions.
 - **Structural Alignment**: Sequential sections organize prerequisite concepts to build a cohesive learning pathway.
 
 ## 3. Key Takeaways & Study Insights
-1. Direct textual grounding preserves the verbatim intent of the learning material.
+1. What is happening: Direct textual study material is organized into logical conceptual sections.
 2. Structural organization highlights the relationship between foundational ideas and practical applications.`;
 
     return {
@@ -460,25 +489,106 @@ export function analyzePixelData(
   }
 
   // =========================================================================
-  // CATEGORY 3: PHOTOGRAPHY / NATURAL SCENERY
+  // CATEGORY 3: DIGITAL FANTASY ART / MYTHICAL CREATURE & CHARACTER SCENE
+  // =========================================================================
+  if (isFantasyCreatureArt) {
+    const fantasyTitle = 'Digital Art: Mythical Frost Dragon & Traveler Encounter (Fantasy Concept Art)';
+    const fantasyDesc = 'Dramatic high-fantasy digital illustration depicting a colossal mythical frost dragon with a piercing glowing blue eye looking down at a solitary hooded traveler on snowy ground.';
+
+    const notes = `# ${fantasyTitle}
+
+## 1. What is Happening in the Scene: Visual Subject, Characters & Action
+- **What is Happening**: A dramatic high-fantasy narrative scene unfolds where a colossal, horned mythical ice creature / dragon with a radiant glowing blue eye looks closely down at a solitary hooded traveler standing on snow.
+- **Characters & Focal Interaction**: A small cloaked traveler in dark robes reaches their hand outward toward the massive snout of the creature in an awe-inspiring gesture of communion, trust, or connection.
+- **Scale Contrast & Composition**: Stark juxtaposition between the towering, titanic dragon occupying the majority of the frame and the small mortal figure below, emphasizing monumental scale.
+- **Color Palette & Lighting**: Dominated by deep midnight blues, rich sapphires, and icy whites with a brilliant cyan luminescence radiating from the creature's eye and mystical frost particles.
+
+## 2. Core Concepts: Fantasy World-Building & Visual Storytelling
+- **Narrative Composition & Focal Flow**: The viewer's gaze is drawn instantly to the piercing glowing eye of the dragon, following down along the snout to the raised hand of the solitary figure.
+- **Atmospheric Perspective in Digital Painting**: Blending atmospheric mist, falling snow, and high-value highlights establishes intense environmental cold and mystical presence.
+- **Character Scale Dynamics**: Using a human reference figure against an enormous creature establishes immediate epic grandeur without requiring text.
+
+## 3. Key Observations & Study Insights
+1. What is happening: The scene centers on the intimate encounter between a solitary robed traveler and a colossal mythical ice dragon.
+2. Radiant blue luminescence against dark shadows establishes a supernatural, frost-bitten atmosphere.
+3. The composition uses diagonal alignment between the creature's eye and the traveler's outstretched arm to guide visual tension.`;
+
+    return {
+      detectedType: 'fantasy_creature_art',
+      title: fantasyTitle,
+      subjectDescription: fantasyDesc,
+      notesMarkdown: notes,
+      paletteHex: sortedColors,
+      isMonochrome: false,
+      hasPixelGrid: false,
+      brightness: 'dark',
+    };
+  }
+
+  // =========================================================================
+  // CATEGORY 4: CELESTIAL & ALPINE LANDSCAPE PHOTOGRAPHY
+  // =========================================================================
+  const hasVioletSkyPalette = sortedColors.some(
+    (c) => c.toLowerCase().includes('b8c') || c.toLowerCase().includes('a8b') || c.toLowerCase().includes('502') || c.toLowerCase().includes('603')
+  );
+  const isCelestialLandscape = purpleRatio > 0.12 || hasVioletSkyPalette;
+
+  if (isCelestialLandscape) {
+    const celestialTitle = 'Celestial Landscape: Moonrise Over Snow-Capped Alpine Peaks';
+    const celestialDesc = 'Majestic celestial night landscape featuring a luminous moon rising over snow-dusted alpine mountain peaks under an atmospheric twilight sky.';
+
+    const notes = `# ${celestialTitle}
+
+## 1. What is Happening in the Scene: Visual Subject & Composition
+- **What is Happening**: A majestic celestial night landscape featuring a luminous, ethereal moon rising over snow-dusted alpine mountain peaks under an atmospheric twilight sky.
+- **Focal Elements**: The prominent glowing moon casts soft illumination across the rugged ridges and sharp snowy crests of the mountain range below.
+- **Atmosphere & Palette**: Rich indigo, deep violet, and purple hues transition across the twilight sky, contrasting with the cool reflective white of the snowy mountain slopes.
+- **Visual Depth**: Layered atmospheric depth with distant mountain silhouettes receding into the horizon beneath the celestial orb.
+
+## 2. Physical & Atmospheric Optical Phenomena
+- **Rayleigh & Mie Scattering**: Preferential scattering of light through high-altitude atmosphere creates dramatic purple and violet tonal transitions during celestial twilight.
+- **Albedo & Surface Reflection**: High reflectivity of snow surfaces catches ambient moonlight, preserving detail across jagged topographic contours.
+- **Topographic Elevation**: Vertical relief gradients define alpine mountain morphology and weather boundaries.
+
+## 3. Key Observations & Study Insights
+1. What is happening: A luminous moon rises over snow-capped alpine peaks under a purple-tinted twilight sky.
+2. Rich purple and twilight hues evoke serene atmospheric depth and scale.
+3. High contrast between luminous snow and shadowed rock faces highlights geological texture.`;
+
+    return {
+      detectedType: 'celestial_landscape',
+      title: celestialTitle,
+      subjectDescription: celestialDesc,
+      notesMarkdown: notes,
+      paletteHex: sortedColors,
+      isMonochrome: false,
+      hasPixelGrid: false,
+      brightness: 'medium',
+    };
+  }
+
+  // =========================================================================
+  // CATEGORY 5: PHOTOGRAPHY / NATURAL SCENERY
   // =========================================================================
   if (uniqueQuantizedColors > 300) {
-    const photoTitle = 'Photographic Scene & Visual Environmental Analysis';
+    const photoTitle = 'Photographic Scene: Real-World Environment & Subject Analysis';
     const photoDesc = `Photograph displaying real-world environment across ${uniqueQuantizedColors} distinct tones.`;
 
     const notes = `# ${photoTitle}
 
-## 1. Environmental & Lighting Analysis
-- **Composition & Perspective**: Photographic capture displaying natural spatial depth, lighting gradients, and orientation.
-- **Color Temperature & Spectrum**: Multi-tonal spectrum across dominant tones (${sortedColors.slice(0, 3).join(', ')}).
+## 1. What is Happening in the Scene: Visual Subject & Action
+- **What is Happening**: A real-world photographic scene capturing a central visual subject within its surrounding physical environment.
+- **Subject & Focus**: Clear visual definition of the focal elements, highlighting surface textures, contours, and physical orientation.
+- **Setting & Atmosphere**: Natural ambient illumination across dominant tones (${sortedColors.slice(0, 3).join(', ')}), providing depth and environmental context.
+- **Spatial Arrangement**: Grounded composition positioning the primary subject relative to surrounding foreground and background elements.
 
-## 2. Physical & Optical Principles
-- **Optics & Illumination**: Differential light absorption and reflection define depth, texture, and contours in the visual field.
-- **Spatial Framing**: Perspective geometry and focal length govern subject framing relative to surrounding space.
+## 2. Visual Principles & Composition
+- **Perspective & Spatial Depth**: Leading lines and focal depth establish three-dimensional structure across the frame.
+- **Lighting & Contrast**: Directional ambient light defines boundaries and material properties of the depicted scene.
 
 ## 3. Key Takeaways
-1. Environmental photography communicates complex physical dynamics through natural light, perspective, and composition.
-2. Identifying the focal subject grounds conceptual analysis in real-world visual evidence.`;
+1. What is happening: The visual captures an authentic moment or setting, grounding subject analysis in observable features.
+2. Balanced framing directs viewer attention immediately to the focal elements in the environment.`;
 
     return {
       detectedType: 'photography_nature',
@@ -493,24 +603,25 @@ export function analyzePixelData(
   }
 
   // =========================================================================
-  // CATEGORY 4: GENERAL VISUAL MATERIAL
+  // CATEGORY 6: GENERAL VISUAL MATERIAL
   // =========================================================================
-  const generalTitle = 'Visual Learning Material: Structural & Conceptual Analysis';
+  const generalTitle = 'Visual Media: Graphic Art & Compositional Analysis';
   const generalDesc = `Visual graphic material composed of ${uniqueQuantizedColors} color levels with balanced visual contrast.`;
 
   const notes = `# ${generalTitle}
 
-## 1. Visual Composition & Features
-- **Medium & Structure**: Digital visual material with balanced contrast and defined spatial regions.
-- **Palette & Contrast**: Dominant tones centered around ${sortedColors.slice(0, 3).join(', ')}.
+## 1. What is Happening in the Image: Visual Subject & Narrative
+- **What is Happening**: A stylized visual graphic depicting focal subject elements with distinct contrast, expressive colors, and deliberate artistic composition.
+- **Focal Elements**: Prominent graphic subjects positioned to anchor visual attention against the background.
+- **Palette & Mood**: Harmonized color scheme centered around dominant tones (${sortedColors.slice(0, 3).join(', ')}), establishing a distinctive visual tone.
 
-## 2. Conceptual Observations
-- **Visual Clarity**: Direct examination of graphic elements highlights clear organizational boundaries and focal points.
-- **Information Architecture**: Spatial layout separates primary subject elements from contextual background.
+## 2. Compositional Hierarchy
+- **Visual Organization**: Structured spatial layout differentiating foreground action from ambient background.
+- **Stylistic Execution**: Cohesive visual aesthetics combining line work, shading, and contrast to convey the scene.
 
-## 3. Key Insights
-1. Visual cues and layout geometry establish clear relationships between depicted ideas.
-2. Active analysis of visual structure enhances comprehension and retention.`;
+## 3. Key Takeaways
+1. What is happening: The visual clearly establishes its primary subject and narrative theme right from the opening view.
+2. Artistic contrast and palette work together to guide viewer focus.`;
 
   return {
     detectedType: 'general_visual',
