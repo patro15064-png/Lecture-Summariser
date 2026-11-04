@@ -8,10 +8,9 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const clientHeaderKey = req.headers.get('x-gemini-key');
-    const effectiveKey = clientHeaderKey?.trim() || process.env.GEMINI_API_KEY?.trim();
-
+    const clientHeaderKey = req.headers.get('x-api-key') || req.headers.get('x-gemini-key');
     const body = await req.json().catch(() => null);
+    const effectiveKey = clientHeaderKey?.trim() || body?.apiKey?.trim() || process.env.GEMINI_API_KEY?.trim();
     if (!body || !body.concept || !body.studentExplanation || !body.artifact) {
       return NextResponse.json(
         { error: 'Request payload must include concept, studentExplanation, and artifact.' },

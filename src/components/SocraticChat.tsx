@@ -17,13 +17,14 @@ import {
   HelpCircle,
   BookOpen
 } from 'lucide-react';
-import { LectureArtifact } from '@/types/lecture';
+import { LectureArtifact, UserApiSettings } from '@/types/lecture';
 
 interface SocraticChatProps {
   artifact: LectureArtifact;
   currentTime: number;
   onSeek: (seconds: number) => void;
   apiKey?: string;
+  settings?: UserApiSettings;
 }
 
 interface ChatMessage {
@@ -33,7 +34,7 @@ interface ChatMessage {
   timestamp: string;
 }
 
-export function SocraticChat({ artifact, currentTime, onSeek, apiKey }: SocraticChatProps) {
+export function SocraticChat({ artifact, currentTime, onSeek, apiKey, settings }: SocraticChatProps) {
   const messageIdCounter = useRef(1);
 
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -124,17 +125,59 @@ Ask me anything about this lecture! Whenever I reference a concept, I will inclu
           content: m.content,
         }));
 
+      // Find active provider and key from settings
+      let provider = 'gemini';
+      let activeKey = apiKey || '';
+      let activeModel: string | undefined;
+      let activeBaseUrl: string | undefined;
+
+      if (settings) {
+        if (settings.useSingleModel) {
+          provider = settings.singleProvider;
+          activeKey = settings.providers[settings.singleProvider]?.apiKey || '';
+          activeModel = settings.singleModel || settings.providers[settings.singleProvider]?.defaultModel;
+          activeBaseUrl = settings.providers[settings.singleProvider]?.baseUrl;
+        } else {
+          const chatAssignment = settings.assignments?.chat;
+          if (chatAssignment && settings.providers[chatAssignment.provider]?.apiKey?.trim()) {
+            provider = chatAssignment.provider;
+            activeKey = settings.providers[chatAssignment.provider]?.apiKey?.trim() || '';
+            activeModel = chatAssignment.model || settings.providers[chatAssignment.provider]?.defaultModel;
+            activeBaseUrl = settings.providers[chatAssignment.provider]?.baseUrl;
+          } else {
+            const providersList: Array<keyof typeof settings.providers> = ['gemini', 'openai', 'groq', 'openrouter', 'anthropic', 'custom'];
+            for (const p of providersList) {
+              const cfg = settings.providers[p];
+              if (cfg?.apiKey?.trim()) {
+                provider = p;
+                activeKey = cfg.apiKey.trim();
+                activeModel = cfg.defaultModel;
+                activeBaseUrl = cfg.baseUrl;
+                break;
+              }
+            }
+          }
+        }
+      }
+
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(apiKey ? { 'x-gemini-key': apiKey } : {}),
+          'x-api-key': activeKey,
+          'x-provider': provider,
+          'x-model': activeModel || '',
+          'x-base-url': activeBaseUrl || '',
         },
         body: JSON.stringify({
           message: textToSend,
           history,
           artifact,
           mode,
+          apiKey: activeKey,
+          provider,
+          model: activeModel,
+          baseUrl: activeBaseUrl,
           currentPlaybackTime: currentPlaybackFormatted,
         }),
       });

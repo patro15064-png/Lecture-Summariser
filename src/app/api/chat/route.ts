@@ -8,8 +8,10 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const clientHeaderKey = req.headers.get('x-gemini-key');
-    const effectiveKey = clientHeaderKey?.trim() || process.env.GEMINI_API_KEY?.trim();
+    const clientHeaderKey = req.headers.get('x-api-key') || req.headers.get('x-gemini-key');
+    const clientProvider = req.headers.get('x-provider') || 'gemini';
+    const clientModel = req.headers.get('x-model') || undefined;
+    const clientBaseUrl = req.headers.get('x-base-url') || undefined;
 
     const body = await req.json().catch(() => null);
     if (!body || !body.message || !body.artifact) {
@@ -19,12 +21,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { message, history, artifact, mode } = body as {
+    const { message, history, artifact, mode, apiKey: bodyKey, provider: bodyProvider, model: bodyModel, baseUrl: bodyBaseUrl } = body as {
       message: string;
       history?: Array<{ role: 'user' | 'model'; content: string }>;
       artifact: LectureArtifact;
       mode?: 'socratic' | 'direct';
+      apiKey?: string;
+      provider?: string;
+      model?: string;
+      baseUrl?: string;
     };
+
+    const effectiveKey = (bodyKey || clientHeaderKey || process.env.GEMINI_API_KEY || '').trim();
+    const effectiveProvider = bodyProvider || clientProvider;
+    const effectiveModel = bodyModel || clientModel;
+    const effectiveBaseUrl = bodyBaseUrl || clientBaseUrl;
 
     const reply = await chatWithLecture({
       message,
@@ -32,12 +43,15 @@ export async function POST(req: NextRequest) {
       artifact,
       mode: mode || 'socratic',
       apiKey: effectiveKey,
+      provider: effectiveProvider,
+      model: effectiveModel,
+      baseUrl: effectiveBaseUrl,
     });
 
     return NextResponse.json({
       success: true,
       reply,
-      source: effectiveKey ? 'gemini' : 'contextual-heuristics',
+      source: effectiveKey ? `${effectiveProvider}-real-ai` : 'contextual-heuristics',
     });
   } catch (error: unknown) {
     console.error('[API /api/chat Error]:', error);

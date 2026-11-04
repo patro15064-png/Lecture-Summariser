@@ -236,19 +236,22 @@ export async function chatWithLecture(params: {
   artifact: LectureArtifact;
   mode?: 'socratic' | 'direct';
   apiKey?: string;
+  provider?: string;
+  model?: string;
+  baseUrl?: string;
 }): Promise<string> {
-  const { message, history = [], artifact, mode = 'socratic', apiKey } = params;
-  const activeKey = apiKey || process.env.GEMINI_API_KEY;
+  const { message, history = [], artifact, mode = 'socratic', apiKey, provider = 'gemini', model: chosenModel, baseUrl } = params;
+  const activeKey = apiKey || process.env.GEMINI_API_KEY || '';
 
   // Concept summaries with timestamps for grounding
-  const groundedContext = artifact.concepts
+  const groundedContext = (artifact.concepts || [])
     .map(
       (c) =>
-        `[${c.timestampFormatted}] ${c.title}: ${c.summary}. Formula: ${c.formulaLatex || 'N/A'}. Key Takeaways: ${c.keyTakeaways.join('; ')}`
+        `[${c.timestampFormatted}] ${c.title}: ${c.summary}. Formula: ${c.formulaLatex || 'N/A'}. Key Takeaways: ${(c.keyTakeaways || []).join('; ')}`
     )
     .join('\n');
 
-  const goldenContext = artifact.goldenSnippets
+  const goldenContext = (artifact.goldenSnippets || [])
     .map((s) => `[${s.durationFormatted}] "${s.transcriptSnippet}" (Why it matters: ${s.whyItMatters})`)
     .join('\n');
 
@@ -259,16 +262,13 @@ export async function chatWithLecture(params: {
         .join('\n')
     : '';
 
-  if (activeKey) {
-    try {
-      const ai = new GoogleGenerativeAI(activeKey);
-      const model = ai.getGenerativeModel({
-        model: 'gemini-2.0-flash',
-        systemInstruction: `You are an elite University Academic Tutor specializing in: "${artifact.title}" (${artifact.course}).
-Ground all answers strictly in the following verified lecture milestones, transcript excerpts, and golden quotes:
-LECTURE CONTEXT:
-${artifact.overview}
-Key Themes: ${artifact.keyThemes.join(', ')}
+  const systemInstruction = `You are an elite, highly engaging University Academic Tutor and Learning Coach specializing in: "${artifact.title}" (${artifact.course || 'Curriculum'}).
+You are having an interactive conversation with a student.
+
+GROUNDING MATERIAL:
+Title: ${artifact.title}
+Overview: ${artifact.overview}
+Key Themes: ${(artifact.keyThemes || []).join(', ')}
 
 CONCEPTS & TIMESTAMPS:
 ${groundedContext}
@@ -279,13 +279,22 @@ ${transcriptExcerpt}
 GOLDEN BREAKTHROUGH SNIPPETS:
 ${goldenContext}
 
-PEDAGOGICAL DIRECTIVE (${mode.toUpperCase()} MODE):
-${
+PEDAGOGICAL DIRECTIVE:
+1. Converse naturally and directly address whatever the student asks, wonders, or observes. Never repeat generic canned templates or stock questions over and over.
+2. ${
   mode === 'socratic'
-    ? 'Act as a Socratic mentor: Engage directly with what the user says. If they make an observation, ask a question, or clarify something, acknowledge it directly. Ask guiding questions, point out conceptual connections, offer intuitive analogies, and reference specific timestamps using format [MM:SS] (e.g., "[00:00]" or "[01:30]") so the student can jump to that part of the lecture. Do NOT repeat the exact same canned template on every message.'
-    : 'Provide a direct, rigorous, clear explanation answering the student prompt with precision, intuitive diagrams or formulas, and exact timestamp citations in format [MM:SS].'
+    ? 'In Socratic mode, guide the student with thoughtful explanations, intuitive analogies, and 1 targeted provocative question that helps them think deeper about their specific query.'
+    : 'In Direct mode, give a clear, comprehensive, step-by-step authoritative breakdown with formulas, examples, and key points.'
 }
-Always cite relevant timestamps [MM:SS] so the student can click to review the lecture.`,
+3. Always include relevant timestamp markers in format [MM:SS] (like "[01:30]" or "[03:45]") where the concept appears, so the student can click to jump the audio player instantly.`;
+
+  // 1. Google Gemini Provider
+  if (activeKey && (provider === 'gemini' || activeKey.startsWith('AIza'))) {
+    try {
+      const ai = new GoogleGenerativeAI(activeKey);
+      const geminiModel = ai.getGenerativeModel({
+        model: chosenModel || 'gemini-2.0-flash',
+        systemInstruction,
       });
 
       const formattedHistory = history.map((h) => ({
@@ -293,23 +302,116 @@ Always cite relevant timestamps [MM:SS] so the student can click to review the l
         parts: [{ text: h.content }],
       }));
 
-      const chat = model.startChat({
+      const chat = geminiModel.startChat({
         history: formattedHistory,
       });
 
       const result = await chat.sendMessage(message);
-      return result.response.text();
+      const text = result.response.text();
+      if (text && text.trim().length > 0) {
+        return text.trim();
+      }
     } catch (err) {
-      console.warn('[Gemini Chat Error] Falling back to intelligent heuristic response:', err);
+      console.warn('[Gemini Chat Error] Falling back to multi-provider / heuristics:', err);
     }
   }
 
-  // High-fidelity fallback logic for demo exploration without API keys
+  // 2. OpenAI, Groq, OpenRouter, or Custom Endpoint
+  if (activeKey && (provider === 'openai' || provider === 'groq' || provider === 'openrouter' || provider === 'custom')) {
+    try {
+      let endpoint = 'https://api.openai.com/v1/chat/completions';
+      if (provider === 'groq') endpoint = 'https://api.groq.com/openai/v1/chat/completions';
+      if (provider === 'openrouter') endpoint = 'https://openrouter.ai/api/v1/chat/completions';
+      if (provider === 'custom') endpoint = `${(baseUrl || 'http://localhost:11434/v1').replace(/\/$/, '')}/chat/completions`;
+
+      const targetModel =
+        chosenModel ||
+        (provider === 'groq'
+          ? 'llama-3.3-70b-versatile'
+          : provider === 'openrouter'
+          ? 'deepseek/deepseek-chat'
+          : 'gpt-4o-mini');
+
+      const messages = [
+        { role: 'system', content: systemInstruction },
+        ...history.map((h) => ({
+          role: h.role === 'model' ? ('assistant' as const) : ('user' as const),
+          content: h.content,
+        })),
+        { role: 'user' as const, content: message },
+      ];
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${activeKey}`,
+        },
+        body: JSON.stringify({
+          model: targetModel,
+          messages,
+          temperature: 0.3,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const reply = data.choices?.[0]?.message?.content;
+        if (reply && reply.trim().length > 0) {
+          return reply.trim();
+        }
+      }
+    } catch (llmErr) {
+      console.warn('[LLM Chat Error]:', llmErr);
+    }
+  }
+
+  // 3. Anthropic Claude Provider
+  if (activeKey && provider === 'anthropic') {
+    try {
+      const targetModel = chosenModel || 'claude-3-5-sonnet-20241022';
+      const messages = [
+        ...history.map((h) => ({
+          role: h.role === 'model' ? ('assistant' as const) : ('user' as const),
+          content: h.content,
+        })),
+        { role: 'user' as const, content: message },
+      ];
+
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': activeKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: targetModel,
+          system: systemInstruction,
+          messages,
+          max_tokens: 1024,
+          temperature: 0.3,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const reply = data.content?.[0]?.text;
+        if (reply && reply.trim().length > 0) {
+          return reply.trim();
+        }
+      }
+    } catch (anthropicErr) {
+      console.warn('[Anthropic Chat Error]:', anthropicErr);
+    }
+  }
+
+  // High-fidelity fallback logic for demo exploration or offline sessions
   return generateContextualChatFallback(message, artifact, mode);
 }
 
 /**
- * Intelligent heuristic fallback response generator grounded in the lecture artifact and user query.
+ * Intelligent contextual fallback response grounded directly in the lecture artifact.
  */
 function generateContextualChatFallback(
   message: string,
@@ -323,10 +425,9 @@ function generateContextualChatFallback(
   // Match the most relevant concept or segment based on keyword overlap
   let matchedConcept = concepts.find((c) =>
     lowerMsg.includes(c.title.toLowerCase()) ||
-    c.keyTakeaways.some((t) => lowerMsg.includes(t.toLowerCase().slice(0, 15)))
+    c.keyTakeaways?.some((t) => lowerMsg.includes(t.toLowerCase().slice(0, 15)))
   );
 
-  // If no direct concept match, check words in the transcript segments
   if (!matchedConcept && segments.length > 0) {
     const words = lowerMsg.split(/\s+/).filter((w) => w.length > 3);
     const matchingSeg = segments.find((seg) =>
@@ -357,78 +458,59 @@ function generateContextualChatFallback(
 
   const timestampTag = `[${matchedConcept.timestampFormatted}]`;
 
-  // 1. Direct answer if user mentions text, notes, audio, voice, or format
-  if (lowerMsg.includes('text') || lowerMsg.includes('format') || lowerMsg.includes('transcript') || lowerMsg.includes('read') || lowerMsg.includes('audio') || lowerMsg.includes('voice')) {
-    return `Yes, absolutely! This lecture is built directly from your ingested text notes.
-
-You can press the **Play** button in the player above at ${timestampTag} and the built-in **AI Voice Narrator (TTS)** will read each line aloud while highlighting the synchronized transcript.
+  // 1. Direct answer if user mentions audio, narrator, voice, or playback
+  if (lowerMsg.includes('text') || lowerMsg.includes('audio') || lowerMsg.includes('voice') || lowerMsg.includes('read') || lowerMsg.includes('play')) {
+    return `Yes! This study session includes a synchronized **AI Voice Narrator**.
+You can click **Play** at ${timestampTag} in the player above, and the browser will read each concept line aloud while highlighting the transcript in sync.
 
 Regarding **${matchedConcept.title}**:
 > "${matchedConcept.summary}"
 
-${
-  mode === 'socratic'
-    ? `From the text you reviewed, what do you think is the primary mechanism connecting this concept with the rest of the lecture?`
-    : `Key Takeaway: ${matchedConcept.keyTakeaways[0] || matchedConcept.summary}`
+${mode === 'socratic'
+  ? `How does this mechanism fit into your understanding of ${artifact.title}? Click ${timestampTag} to listen to the explanation!`
+  : matchedConcept.explanation
 }`;
   }
 
   // 2. Analogy / Intuition request
-  if (lowerMsg.includes('analogy') || lowerMsg.includes('simple') || lowerMsg.includes('like i\'m 5') || lowerMsg.includes('intuition')) {
-    return `Let's break down **${matchedConcept.title}** intuitively!
+  if (lowerMsg.includes('analogy') || lowerMsg.includes('simple') || lowerMsg.includes('intuition') || lowerMsg.includes('explain')) {
+    return `Here is an intuitive way to understand **${matchedConcept.title}** ${timestampTag}:
 
-Think of it like a coordinated network: instead of acting in isolation, each part shares resources and signals dynamically. At ${timestampTag}, the lecture establishes that:
+Think of this like a coordinated physical system: rather than functioning in isolation, every step actively influences the downstream state.
+At ${timestampTag}, the lecture establishes:
 > "${matchedConcept.summary}"
 
-${
-  mode === 'socratic'
-    ? `If this resource transfer were interrupted, how would that affect the neighboring components down the chain? Take a look at the concept graph or jump to ${timestampTag}!`
-    : `**Resolution:** In ${artifact.title}, this dynamic balances the system:
-\`\`\`
-${matchedConcept.formulaLatex || matchedConcept.summary}
-\`\`\`
-Jump to ${timestampTag} in the synced player to explore further.`
+${matchedConcept.formulaLatex ? `The mathematical formulation is:\n\`\`\`latex\n${matchedConcept.formulaLatex}\n\`\`\`\n` : ''}
+${mode === 'socratic'
+  ? `If you were to adjust the boundary inputs, how do you predict the outcome would shift? Click ${timestampTag} to review the audio!`
+  : matchedConcept.explanation
 }`;
   }
 
-  // 3. Misconceptions and traps
-  if (lowerMsg.includes('mistake') || lowerMsg.includes('trap') || lowerMsg.includes('quiz') || lowerMsg.includes('common error')) {
+  // 3. Misconceptions, errors, traps
+  if (lowerMsg.includes('mistake') || lowerMsg.includes('trap') || lowerMsg.includes('quiz') || lowerMsg.includes('wrong') || lowerMsg.includes('error')) {
     const diag = artifact.diagnosticQuestions?.[0];
     const trapOpt = diag?.options?.find((o) => !o.isCorrect);
 
-    return `A major misconception in this lecture relates to **${matchedConcept.title}** ${timestampTag}:
-${trapOpt ? `> Many students believe: *"${trapOpt.text}"*\n\n**Why this fails:** ${trapOpt.misconceptionExplanation}` : `> Assuming that properties remain uniform without considering external interactions.`}
+    return `A common cognitive trap regarding **${matchedConcept.title}** ${timestampTag}:
+${trapOpt ? `> Many students incorrectly assume: *"${trapOpt.text}"*\n\n**Why this fails:** ${trapOpt.misconceptionExplanation}` : `> Assuming properties remain uniform without accounting for prerequisite boundary interactions.`}
 
-Review the resolution directly at ${diag ? `[${Math.floor(diag.timestampSeconds / 60)}:${(diag.timestampSeconds % 60).toString().padStart(2, '0')}]` : timestampTag} in the interactive player!`;
+You can test yourself on this in the **Diagnostic Quizzes** tab or jump directly to ${timestampTag} in the player!`;
   }
 
-  // 4. Socratic inquiry addressing user's actual prompt
-  if (mode === 'socratic') {
-    return `You mentioned: *"${message}"*.
-
-Let's connect this to **${matchedConcept.title}** at ${timestampTag}:
-> "${matchedConcept.summary}"
-
-1. How does your point relate to the core thesis of this section?
-2. If you inspect the relationship at ${timestampTag}:
-${matchedConcept.formulaLatex ? `\`\`\`latex\n${matchedConcept.formulaLatex}\n\`\`\`` : `*${matchedConcept.keyTakeaways[0] || 'Key principle'}*`}
-
-What would be the direct consequence if that premise did not hold? Jump to ${timestampTag} above to verify!`;
-  }
-
-  // 5. Direct mode response
-  return `Regarding your inquiry on *"${message}"*:
-
-In **${artifact.title}**, **${matchedConcept.title}** is detailed at ${timestampTag}:
+  // 4. Default dynamic pedagogical response
+  return `Regarding your question about **${matchedConcept.title}** ${timestampTag}:
 
 ${matchedConcept.explanation}
 
-### Key Takeaways:
-${matchedConcept.keyTakeaways.map((t) => `- ${t}`).join('\n')}
+${matchedConcept.formulaLatex ? `**Key Formulation:**\n\`\`\`latex\n${matchedConcept.formulaLatex}\n\`\`\`\n` : ''}
+**Core Takeaway:**
+${matchedConcept.keyTakeaways?.map((t) => `• ${t}`).join('\n') || matchedConcept.summary}
 
-${matchedConcept.formulaLatex ? `### Formulation:\n\`\`\`latex\n${matchedConcept.formulaLatex}\n\`\`\`` : ''}
-
-Jump directly to ${timestampTag} in the synced player above to follow along!`;
+${mode === 'socratic'
+  ? `How would you connect this principle back to the central thesis of ${artifact.title}? Jump to ${timestampTag} to explore further!`
+  : `Jump to ${timestampTag} in the player above to follow along with the narration!`
+}`;
 }
 
 /**

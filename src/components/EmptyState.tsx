@@ -9,7 +9,8 @@ import {
   Music, 
   Video, 
   FileCode,
-  ArrowRight
+  ArrowRight,
+  Camera
 } from 'lucide-react';
 import { UserApiSettings } from '@/types/lecture';
 
@@ -94,14 +95,17 @@ export function EmptyState({
 
           {/* Supported Format Pills */}
           <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 border border-white/10 text-[11px] font-mono text-pink-300">
+              <Camera className="w-3 h-3 text-pink-400" /> Photos, Notes &amp; Boards
+            </span>
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 border border-white/10 text-[11px] font-mono text-indigo-300">
-              <Music className="w-3 h-3 text-indigo-400" /> MP3, WAV, M4A, AAC
+              <Music className="w-3 h-3 text-indigo-400" /> MP3, WAV, M4A
             </span>
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 border border-white/10 text-[11px] font-mono text-purple-300">
               <Video className="w-3 h-3 text-purple-400" /> MP4, WebM, MOV
             </span>
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 border border-white/10 text-[11px] font-mono text-emerald-300">
-              <FileCode className="w-3 h-3 text-emerald-400" /> VTT, SRT, JSON, TXT
+              <FileCode className="w-3 h-3 text-emerald-400" /> PDF, DOCX, TXT
             </span>
           </div>
 

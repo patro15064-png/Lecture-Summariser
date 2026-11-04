@@ -114,12 +114,13 @@ export function FeynmanCoach({ artifact, onSeek, apiKey }: FeynmanCoachProps) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(apiKey ? { 'x-gemini-key': apiKey } : {}),
+          ...(apiKey ? { 'x-api-key': apiKey, 'x-gemini-key': apiKey } : {}),
         },
         body: JSON.stringify({
           concept: activeConcept,
           studentExplanation: textToEvaluate,
           artifact,
+          apiKey,
         }),
       });
 

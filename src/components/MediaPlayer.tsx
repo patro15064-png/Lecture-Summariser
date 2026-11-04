@@ -43,6 +43,8 @@ export function MediaPlayer({
   const [followAudio, setFollowAudio] = useState(true);
   const [realMediaDuration, setRealMediaDuration] = useState<number | null>(null);
   const [isSpeakingNow, setIsSpeakingNow] = useState(false);
+  const [isDraggingScrubber, setIsDraggingScrubber] = useState(false);
+  const [scrubberDragTime, setScrubberDragTime] = useState<number | null>(null);
 
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const transcriptListRef = useRef<HTMLDivElement | null>(null);
@@ -88,8 +90,13 @@ export function MediaPlayer({
     artifact.durationSeconds ||
     (effectiveSegments.length > 0 ? effectiveSegments[effectiveSegments.length - 1].end : 600);
 
+  const hasRealAudioTrack = Boolean(
+    artifact.mediaUrl && (artifact.mediaType === 'audio' || artifact.mediaType === 'video')
+  );
+
   // Sync real HTMLMediaElement if media URL is attached (video or audio file)
   useEffect(() => {
+    if (!hasRealAudioTrack) return;
     const media = mediaRef.current;
     if (!media) return;
 
@@ -100,23 +107,25 @@ export function MediaPlayer({
     } else {
       media.pause();
     }
-  }, [isPlaying]);
+  }, [isPlaying, hasRealAudioTrack]);
 
   useEffect(() => {
+    if (!hasRealAudioTrack) return;
     const media = mediaRef.current;
     if (!media) return;
     if (Math.abs(media.currentTime - currentTime) > 0.5) {
       media.currentTime = currentTime;
     }
-  }, [currentTime]);
+  }, [currentTime, hasRealAudioTrack]);
 
   useEffect(() => {
+    if (!hasRealAudioTrack) return;
     const media = mediaRef.current;
     if (!media) return;
     media.playbackRate = playbackRate;
     media.muted = isMuted;
     media.volume = volume;
-  }, [playbackRate, isMuted, volume]);
+  }, [playbackRate, isMuted, volume, hasRealAudioTrack]);
 
   // Stop Web Speech Synthesis safely
   const stopSpeech = useCallback(() => {
@@ -135,8 +144,8 @@ export function MediaPlayer({
 
   // Speak a specific segment by index with full audio output and smooth progress tracking
   const speakSegmentIndex = useCallback(
-    (idx: number) => {
-      if (artifact.mediaUrl || typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    (idx: number, startSecondOffset?: number) => {
+      if (hasRealAudioTrack || typeof window === 'undefined' || !('speechSynthesis' in window)) {
         return;
       }
 
@@ -185,11 +194,11 @@ export function MediaPlayer({
 
       utterance.onstart = () => {
         setIsSpeakingNow(true);
-        onTimeUpdate(seg.start);
+        const startTime = startSecondOffset !== undefined ? startSecondOffset : seg.start;
+        onTimeUpdate(startTime);
 
-        // Animate scrubber progress continuously during this segment's speech
+        // Animate scrubber progress continuously during this segment's speech starting from startTime
         if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-        const startTime = seg.start;
         const startWallClock = Date.now();
 
         const loop = () => {
@@ -236,10 +245,10 @@ export function MediaPlayer({
       // Nudge browser in case speech was paused internally
       window.speechSynthesis.resume();
     },
-    [artifact.mediaUrl, effectiveSegments, totalSeconds, onPlayStateChange, onTimeUpdate, stopSpeech]
+    [hasRealAudioTrack, effectiveSegments, totalSeconds, onPlayStateChange, onTimeUpdate, stopSpeech]
   );
 
-  // Speak starting from a specific second timestamp
+  // Speak starting from a specific second timestamp without snapping backward
   const speakFromTime = useCallback(
     (timeSec: number) => {
       let targetIdx = effectiveSegments.findIndex(
@@ -249,7 +258,7 @@ export function MediaPlayer({
         targetIdx = effectiveSegments.findIndex((seg) => seg.end > timeSec);
         if (targetIdx === -1) targetIdx = 0;
       }
-      speakSegmentIndex(targetIdx);
+      speakSegmentIndex(targetIdx, timeSec);
     },
     [effectiveSegments, speakSegmentIndex]
   );
@@ -305,7 +314,7 @@ export function MediaPlayer({
   }, [currentTime, followAudio]);
 
   const handleMediaTimeUpdate = () => {
-    if (mediaRef.current) {
+    if (mediaRef.current && !isDraggingScrubber) {
       onTimeUpdate(mediaRef.current.currentTime);
     }
   };
@@ -320,24 +329,31 @@ export function MediaPlayer({
     onPlayStateChange(false);
   };
 
+  const commitSeek = (targetSec: number) => {
+    setIsDraggingScrubber(false);
+    setScrubberDragTime(null);
+    onTimeUpdate(targetSec);
+    if (hasRealAudioTrack && mediaRef.current) {
+      mediaRef.current.currentTime = targetSec;
+      if (isPlaying) {
+        mediaRef.current.play().catch(() => {});
+      }
+    } else if (isPlaying) {
+      speakFromTime(targetSec);
+    }
+  };
+
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newSec = parseFloat(e.target.value);
-    onTimeUpdate(newSec);
-    if (mediaRef.current) {
-      mediaRef.current.currentTime = newSec;
-    } else if (isPlaying) {
-      speakFromTime(newSec);
+    setScrubberDragTime(newSec);
+    if (!isDraggingScrubber) {
+      commitSeek(newSec);
     }
   };
 
   const skipSeconds = (amount: number) => {
     const nextTime = Math.max(0, Math.min(totalSeconds, currentTime + amount));
-    onTimeUpdate(nextTime);
-    if (mediaRef.current) {
-      mediaRef.current.currentTime = nextTime;
-    } else if (isPlaying) {
-      speakFromTime(nextTime);
-    }
+    commitSeek(nextTime);
   };
 
   const cyclePlaybackRate = () => {
@@ -345,7 +361,7 @@ export function MediaPlayer({
     const currentIndex = rates.indexOf(playbackRate);
     const nextRate = rates[(currentIndex + 1) % rates.length];
     setPlaybackRate(nextRate);
-    if (!artifact.mediaUrl && isPlaying && currentSpeakingIdxRef.current >= 0) {
+    if (!hasRealAudioTrack && isPlaying && currentSpeakingIdxRef.current >= 0) {
       speakSegmentIndex(currentSpeakingIdxRef.current);
     }
   };
@@ -357,7 +373,7 @@ export function MediaPlayer({
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.resume();
     }
-    if (!artifact.mediaUrl) {
+    if (!hasRealAudioTrack) {
       if (nextPlay) {
         speakFromTime(currentTime);
       } else {
@@ -366,11 +382,12 @@ export function MediaPlayer({
     }
   };
 
+  const displayTime = isDraggingScrubber && scrubberDragTime !== null ? scrubberDragTime : currentTime;
   const activeSegment = effectiveSegments.find(
-    (seg) => currentTime >= seg.start && currentTime <= seg.end
+    (seg) => displayTime >= seg.start && displayTime <= seg.end
   ) || effectiveSegments[0];
 
-  const progressPercent = Math.min(100, (currentTime / (totalSeconds || 1)) * 100);
+  const progressPercent = Math.min(100, (displayTime / (totalSeconds || 1)) * 100);
 
   return (
     <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950/80 backdrop-blur-xl shadow-2xl text-slate-100 flex flex-col">
@@ -380,7 +397,7 @@ export function MediaPlayer({
         style={{ width: `${progressPercent}%` }}
       />
 
-      {/* Real HTML5 Media Track (Video or Audio) */}
+      {/* Real HTML5 Media Track (Video, Audio, or Image Preview) */}
       {artifact.mediaUrl && (
         <div className="relative bg-black flex items-center justify-center">
           {artifact.mediaType === 'video' ? (
@@ -393,7 +410,7 @@ export function MediaPlayer({
               className="w-full max-h-80 object-contain"
               playsInline
             />
-          ) : (
+          ) : artifact.mediaType === 'audio' ? (
             <audio
               ref={mediaRef as React.RefObject<HTMLAudioElement>}
               src={artifact.mediaUrl}
@@ -402,6 +419,18 @@ export function MediaPlayer({
               onEnded={handleMediaEnded}
               className="hidden"
             />
+          ) : (
+            <div className="relative max-h-80 w-full overflow-hidden flex items-center justify-center bg-slate-950 p-3 border-b border-white/10 group">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={artifact.mediaUrl}
+                alt="Uploaded visual notes or diagram"
+                className="max-h-72 w-auto object-contain rounded-xl shadow-2xl border border-white/10"
+              />
+              <div className="absolute bottom-3 right-3 px-2.5 py-1 rounded-lg bg-slate-900/90 border border-white/20 text-[11px] text-purple-300 font-mono shadow-md backdrop-blur-md">
+                Visual Material Analyzed
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -418,7 +447,7 @@ export function MediaPlayer({
               <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isPlaying ? 'bg-emerald-500' : 'bg-slate-500'}`} />
             </span>
             <span className="text-xs font-semibold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5 shrink-0">
-              {artifact.mediaUrl ? (
+              {hasRealAudioTrack ? (
                 <>
                   <Radio className="w-3.5 h-3.5 text-indigo-400" />
                   <span>Synchronized Media</span>
@@ -443,7 +472,7 @@ export function MediaPlayer({
 
           <div className="flex items-center gap-2 text-xs font-mono text-slate-300 bg-slate-900/90 px-3 py-1 rounded-xl border border-white/5 shrink-0">
             <Clock className="w-3.5 h-3.5 text-indigo-400" />
-            <span className="text-white font-medium">{formatTime(currentTime)}</span>
+            <span className="text-white font-medium">{formatTime(displayTime)}</span>
             <span className="text-slate-500">/</span>
             <span>{formatTime(totalSeconds)}</span>
           </div>
@@ -478,8 +507,16 @@ export function MediaPlayer({
             min={0}
             max={totalSeconds || 1}
             step={0.1}
-            value={currentTime}
+            value={displayTime}
+            onPointerDown={() => {
+              setIsDraggingScrubber(true);
+              setScrubberDragTime(currentTime);
+            }}
             onChange={handleSeek}
+            onPointerUp={(e) => {
+              const val = parseFloat((e.target as HTMLInputElement).value);
+              commitSeek(val);
+            }}
             className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 hover:accent-purple-400 transition-all"
             aria-label="Lecture progress scrubber"
           />
