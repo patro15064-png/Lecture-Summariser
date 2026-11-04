@@ -61,6 +61,85 @@ export const DEFAULT_AGENT_ROLES: AgentRole[] = [
   'chat',
 ];
 
+export interface ModelCapabilities {
+  supportsVision: boolean;
+  supportsAudio: boolean;
+  supportsText: boolean;
+  description: string;
+  limitations: string[];
+}
+
+/**
+ * Detects whether a provider and model natively support vision and audio,
+ * and warns the user of any fallback mechanisms in place.
+ */
+export function detectModelCapabilities(provider: ApiProvider, model: string): ModelCapabilities {
+  const m = model.toLowerCase();
+
+  if (provider === 'gemini') {
+    const isMultimodal = m.includes('flash') || m.includes('pro') || m.includes('gemini');
+    return {
+      supportsVision: isMultimodal,
+      supportsAudio: isMultimodal,
+      supportsText: true,
+      description: 'Native multimodal engine: processes text, high-res diagrams, formulas, and raw audio directly.',
+      limitations: [],
+    };
+  }
+
+  if (provider === 'openai') {
+    const hasVision = m.includes('gpt-4o') || m.includes('vision') || m.includes('gpt-4-turbo');
+    const limitations: string[] = [];
+    if (!hasVision) {
+      limitations.push('Model is text-only: scanned diagrams will use client-side OCR extraction.');
+    }
+    limitations.push('Audio will be processed via Whisper API or browser Web Speech transcription.');
+    return {
+      supportsVision: hasVision,
+      supportsAudio: false,
+      supportsText: true,
+      description: hasVision
+        ? 'Supports text, photos, and visual diagrams. Audio processed via Whisper fallback.'
+        : 'Text-only model. Images and audio will use client-side extraction fallbacks.',
+      limitations,
+    };
+  }
+
+  if (provider === 'anthropic') {
+    const hasVision = m.includes('claude-3') || m.includes('sonnet') || m.includes('haiku') || m.includes('opus');
+    return {
+      supportsVision: hasVision,
+      supportsAudio: false,
+      supportsText: true,
+      description: 'Supports text analysis, photos, and diagrams. Audio uses transcription fallback.',
+      limitations: ['Audio will be transcribed using browser Web Speech before analysis.'],
+    };
+  }
+
+  if (provider === 'groq') {
+    const hasVision = m.includes('vision');
+    return {
+      supportsVision: hasVision,
+      supportsAudio: false,
+      supportsText: true,
+      description: hasVision
+        ? 'Ultra-fast Llama-3 vision model.'
+        : 'Ultra-fast Llama-3 text model. Scanned images will use client text extraction.',
+      limitations: hasVision
+        ? ['Audio transcribed via Groq Whisper large-v3.']
+        : ['Images and audio will use client extraction fallbacks.'],
+    };
+  }
+
+  return {
+    supportsVision: false,
+    supportsAudio: false,
+    supportsText: true,
+    description: 'Local / Custom OpenAI-compatible endpoint. Visual and audio inputs will use client-side extractors.',
+    limitations: ['Diagrams and audio will be converted to text before sending to model.'],
+  };
+}
+
 export function getDefaultApiSettings(): UserApiSettings {
   return {
     useSingleModel: true,

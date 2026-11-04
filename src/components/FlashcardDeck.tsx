@@ -12,11 +12,14 @@ import {
   Sparkles,
   Headphones,
   Calendar,
-  Square
+  Volume2,
+  VolumeX,
+  FileText,
+  Gauge
 } from 'lucide-react';
 import { LectureArtifact, Flashcard, GoldenAudioSnippet, Sm2Rating } from '@/types/lecture';
 import { calculateSm2 } from '@/lib/grounding';
-import { saveArtifactToCache } from '@/lib/orchestrator';
+import { saveStudyKitToStorage } from '@/lib/studyKitStorage';
 
 interface FlashcardDeckProps {
   artifact: LectureArtifact;
@@ -30,10 +33,13 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
   const [showHint, setShowHint] = useState(false);
   const [dueOnlyFilter, setDueOnlyFilter] = useState(false);
 
+  // 30s TTS Golden Explanation State
+  const [isSpeakingExplanation, setIsSpeakingExplanation] = useState(false);
+  const [speechRate, setSpeechRate] = useState<number>(1.0);
+
   // Commute Mode State
   const [isCommuteMode, setIsCommuteMode] = useState(false);
   const [commuteStage, setCommuteStage] = useState<'idle' | 'speaking_question' | 'recall_pause' | 'playing_clip' | 'speaking_takeaway'>('idle');
-  const [recallCountdown, setRecallCountdown] = useState(4);
   const [isAudioClipPlaying, setIsAudioClipPlaying] = useState(false);
 
   const audioClipRef = useRef<HTMLAudioElement | null>(null);
@@ -54,12 +60,20 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
 
   // Navigation handlers
   const handleNext = useCallback(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsSpeakingExplanation(false);
+    }
     setIsFlipped(false);
     setShowHint(false);
     setCurrentIndex((prev) => (prev < activeDeck.length - 1 ? prev + 1 : 0));
   }, [activeDeck.length]);
 
   const handlePrev = useCallback(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsSpeakingExplanation(false);
+    }
     setIsFlipped(false);
     setShowHint(false);
     setCurrentIndex((prev) => (prev > 0 ? prev - 1 : activeDeck.length - 1));
@@ -89,16 +103,39 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
     const newCards = cards.map((c) => (c.id === currentCard.id ? updatedCard : c));
     setCards(newCards);
 
-    // Save back to cache
+    // Save back to IndexedDB
     const updatedArtifact: LectureArtifact = {
       ...artifact,
       flashcards: newCards,
     };
-    await saveArtifactToCache(updatedArtifact);
+    await saveStudyKitToStorage(updatedArtifact);
 
     setTimeout(() => {
       handleNext();
     }, 200);
+  };
+
+  // 30-Second Golden Explanation TTS Player
+  const toggleSpeechExplanation = () => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window) || !currentCard) return;
+
+    if (isSpeakingExplanation) {
+      window.speechSynthesis.cancel();
+      setIsSpeakingExplanation(false);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const explanationText =
+      currentCard.audioExplanation ||
+      `${currentCard.front}. Here is the core explanation: ${currentCard.back}. Key takeaway to remember: ${currentCard.takeaway}`;
+
+    const utterance = new SpeechSynthesisUtterance(explanationText);
+    utterance.rate = speechRate;
+    utterance.onend = () => setIsSpeakingExplanation(false);
+    utterance.onerror = () => setIsSpeakingExplanation(false);
+    setIsSpeakingExplanation(true);
+    window.speechSynthesis.speak(utterance);
   };
 
   // Play Golden Breakthrough Audio Clip
@@ -131,117 +168,46 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
     }
   };
 
-  // Web Speech helper
-  const speakText = (text: string): Promise<void> => {
-    return new Promise((resolve) => {
-      if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-        return resolve();
-      }
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.05;
-      utterance.pitch = 1.0;
-      utterance.onend = () => resolve();
-      utterance.onerror = () => resolve();
-      window.speechSynthesis.speak(utterance);
-    });
-  };
-
-  const toggleCommuteMode = useCallback((active: boolean) => {
-    setIsCommuteMode(active);
-    if (!active) {
+  // Commute Hands-Free Mode Controller
+  const toggleCommuteMode = useCallback((start: boolean) => {
+    if (!start) {
+      setIsCommuteMode(false);
       setCommuteStage('idle');
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
       stopAudioClip();
-    }
-  }, []);
-
-  // Commute Mode Step Automation
-  useEffect(() => {
-    if (!isCommuteMode || !currentCard) {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
       return;
     }
+    setIsCommuteMode(true);
+    setCommuteStage('speaking_question');
+  }, []);
 
-    let isCancelled = false;
-
-    const runCommuteStep = async () => {
-      // 1. Speak Question
-      setCommuteStage('speaking_question');
-      setIsFlipped(false);
-      await speakText(`Question: ${currentCard.front}`);
-      if (isCancelled) return;
-
-      // 2. Silent Recall Pause
-      setCommuteStage('recall_pause');
-      setRecallCountdown(4);
-      for (let sec = 4; sec > 0; sec--) {
-        if (isCancelled) return;
-        setRecallCountdown(sec);
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-      if (isCancelled) return;
-
-      // Flip card to reveal
-      setIsFlipped(true);
-
-      // 3. Play golden breakthrough clip if audio available
-      if (artifact.mediaUrl && relatedSnippet) {
-        setCommuteStage('playing_clip');
-        playAudioClip();
-        const durationSec = Math.min(25, relatedSnippet.endSeconds - relatedSnippet.startSeconds);
-        await new Promise((r) => setTimeout(r, durationSec * 1000));
-        stopAudioClip();
-      }
-      if (isCancelled) return;
-
-      // 4. Speak Takeaway
-      setCommuteStage('speaking_takeaway');
-      await speakText(`Key Takeaway: ${currentCard.takeaway}`);
-      if (isCancelled) return;
-
-      // Pause before next card
-      await new Promise((r) => setTimeout(r, 2000));
-      if (isCancelled) return;
-
-      // Advance to next card
-      handleNext();
-    };
-
-    runCommuteStep();
-
-    return () => {
-      isCancelled = true;
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
-      stopAudioClip();
-    };
-  }, [isCommuteMode, currentIndex]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Media Session API for Lock Screen & Headphone Controls
+  // Keyboard navigation shortcuts
   useEffect(() => {
-    if (typeof window === 'undefined' || !('mediaSession' in navigator) || !currentCard) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handleFlip();
+      } else if (e.code === 'ArrowRight') {
+        handleNext();
+      } else if (e.code === 'ArrowLeft') {
+        handlePrev();
+      } else if (e.key === '1') {
+        handleRateSm2('again');
+      } else if (e.key === '2') {
+        handleRateSm2('hard');
+      } else if (e.key === '3') {
+        handleRateSm2('good');
+      } else if (e.key === '4') {
+        handleRateSm2('easy');
+      }
+    };
 
-    try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: currentCard.front,
-        artist: artifact.title || 'Lecture Flashcard',
-        album: isCommuteMode ? 'Commute Hands-Free Mode' : 'Spaced Repetition Deck',
-      });
-
-      navigator.mediaSession.setActionHandler('nexttrack', () => handleNext());
-      navigator.mediaSession.setActionHandler('previoustrack', () => handlePrev());
-      navigator.mediaSession.setActionHandler('play', () => toggleCommuteMode(true));
-      navigator.mediaSession.setActionHandler('pause', () => toggleCommuteMode(false));
-    } catch {
-      // MediaSession may not support all handlers on older browsers
-    }
-  }, [currentCard, isCommuteMode, artifact.title, handleNext, handlePrev, toggleCommuteMode]);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
 
   if (activeDeck.length === 0) {
     return (
@@ -263,6 +229,7 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
   // Count due cards
   const now = new Date();
   const dueCount = cards.filter((c) => new Date(c.dueDate) <= now).length;
+  const progressPercent = Math.round(((currentIndex + 1) / activeDeck.length) * 100);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -271,21 +238,21 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
         <audio ref={audioClipRef} src={artifact.mediaUrl} className="hidden" />
       )}
 
-      {/* Top Banner & Commute Mode Switch */}
+      {/* Top Banner, Progress & Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-3xl border border-white/10 bg-slate-950/70 backdrop-blur-xl">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-2xl bg-pink-500/10 border border-pink-500/20 text-pink-400">
+          <div className="p-2.5 rounded-2xl bg-pink-500/10 border border-pink-500/20 text-pink-400 shrink-0">
             <Layers className="w-5 h-5" />
           </div>
           <div>
             <h2 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center gap-2">
-              Spaced-Repetition Audio Flashcards
+              Spaced-Repetition Active Recall
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-pink-500/20 text-pink-300 border border-pink-500/30 font-medium">
                 SM-2 Scheduled
               </span>
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Reinforce high-yield golden moments with interval-spaced active recall.
+              Reinforce high-yield concepts with interval-spaced active recall and 30s audio explanations.
             </p>
           </div>
         </div>
@@ -298,11 +265,11 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
             onClick={() => setDueOnlyFilter(!dueOnlyFilter)}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all ${
               dueOnlyFilter
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30 shadow-sm'
                 : 'text-slate-400 hover:text-white bg-slate-900 border-white/5'
             }`}
           >
-            <Calendar className="w-3.5 h-3.5" />
+            <Calendar className="w-3.5 h-3.5 text-amber-400" />
             <span>Due Today ({dueCount})</span>
           </button>
 
@@ -317,39 +284,57 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
             }`}
           >
             <Headphones className="w-4 h-4" />
-            <span>{isCommuteMode ? 'Commute Mode Active' : 'Start Commute Mode'}</span>
+            <span>{isCommuteMode ? `Commute: ${commuteStage.replace('_', ' ')}` : 'Commute Mode'}</span>
           </button>
         </div>
       </div>
 
-      {/* Commute Mode Status Bar */}
-      {isCommuteMode && (
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/50 via-slate-950 to-indigo-950/50 border border-emerald-500/30 flex items-center justify-between text-xs animate-in fade-in">
-          <div className="flex items-center gap-3">
-            <span className="flex h-3 w-3 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
-            </span>
-            <div>
-              <span className="font-bold text-white block">Hands-Free Commute Queue</span>
-              <span className="text-emerald-300 font-mono">
-                {commuteStage === 'speaking_question' && 'Speaking Question (TTS)...'}
-                {commuteStage === 'recall_pause' && `Active Recall Window: ${recallCountdown}s`}
-                {commuteStage === 'playing_clip' && 'Playing Original Lecture Clip...'}
-                {commuteStage === 'speaking_takeaway' && 'Speaking Key Pedagogical Takeaway...'}
-              </span>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => toggleCommuteMode(false)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-medium border border-white/10"
-          >
-            <Square className="w-3 h-3" /> Stop
-          </button>
+      {/* Visual Deck Progress Bar */}
+      <div className="max-w-2xl mx-auto space-y-1.5">
+        <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+          <span>Card {currentIndex + 1} of {activeDeck.length}</span>
+          <span>{progressPercent}% Complete</span>
         </div>
-      )}
+        <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-white/5">
+          <div
+            className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 transition-all duration-300 rounded-full"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+      </div>
+
+      {/* 30s Audio Golden Explanation Toolbar */}
+      <div className="max-w-2xl mx-auto flex items-center justify-between p-3 rounded-2xl bg-slate-950/80 border border-white/10 text-xs">
+        <button
+          type="button"
+          onClick={toggleSpeechExplanation}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl font-semibold transition-all ${
+            isSpeakingExplanation
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 animate-pulse'
+              : 'bg-slate-900 hover:bg-slate-800 text-purple-300 border border-purple-500/20'
+          }`}
+        >
+          {isSpeakingExplanation ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          <span>{isSpeakingExplanation ? 'Pause 30s Explanation' : 'Listen to 30s Explanation'}</span>
+        </button>
+
+        {/* Speed Selector */}
+        <div className="flex items-center gap-2 text-slate-400">
+          <Gauge className="w-3.5 h-3.5" />
+          <span className="text-[11px] font-mono">Speed:</span>
+          <select
+            value={speechRate}
+            onChange={(e) => setSpeechRate(parseFloat(e.target.value))}
+            className="bg-slate-900 text-white text-xs rounded-lg px-2 py-1 border border-white/10 focus:outline-none cursor-pointer"
+          >
+            <option value="0.75">0.75x</option>
+            <option value="1.0">1.0x</option>
+            <option value="1.25">1.25x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2.0">2.0x</option>
+          </select>
+        </div>
+      </div>
 
       {/* 3D Flip Card Container */}
       <div className="flex flex-col items-center">
@@ -359,44 +344,42 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
           role="button"
           tabIndex={0}
           onKeyDown={(e) => {
-            if (e.key === ' ' || e.key === 'Enter') {
-              e.preventDefault();
-              handleFlip();
-            }
+            if (e.key === 'Enter') handleFlip();
           }}
-          aria-label="Click to flip flashcard"
         >
-          <div
-            className={`relative w-full h-full duration-500 rounded-3xl transition-transform [transform-style:preserve-3d] ${
+          <div 
+            className={`relative w-full h-full transition-transform duration-500 [transform-style:preserve-3d] ${
               isFlipped ? '[transform:rotateY(180deg)]' : ''
             }`}
           >
             {/* FRONT OF CARD */}
-            <div className="absolute inset-0 w-full h-full rounded-3xl border border-white/10 bg-slate-950/90 backdrop-blur-2xl p-8 flex flex-col justify-between shadow-2xl [backface-visibility:hidden]">
-              {/* Card Header */}
+            <div className="absolute inset-0 w-full h-full rounded-3xl border border-white/15 bg-slate-950/90 backdrop-blur-2xl p-7 flex flex-col justify-between shadow-2xl [backface-visibility:hidden]">
+              {/* Front Header */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono font-semibold px-3 py-1 rounded-full bg-slate-900 border border-white/10 text-slate-300">
-                    Card {currentIndex + 1} of {activeDeck.length}
+                  <span className="text-xs font-mono font-semibold px-3 py-1 rounded-full bg-pink-500/20 border border-pink-500/30 text-pink-300">
+                    Active Recall Prompt
                   </span>
-                  <span className="text-[11px] font-mono text-slate-500">
-                    Rep: {currentCard.repetition} • EF: {currentCard.easeFactor.toFixed(1)}
-                  </span>
+                  {relatedConcept && (
+                    <span className="text-xs text-slate-400 truncate max-w-[180px]">
+                      {relatedConcept.title}
+                    </span>
+                  )}
                 </div>
 
-                {relatedConcept && (
-                  <span className="text-xs font-semibold text-pink-300 flex items-center gap-1.5 bg-pink-500/10 px-3 py-1 rounded-full border border-pink-500/20">
-                    <Sparkles className="w-3.5 h-3.5" /> {relatedConcept.title}
+                {/* Source Citation Badge */}
+                {currentCard.sourceCitation && (
+                  <span className="flex items-center gap-1 text-[11px] text-slate-400 font-mono bg-slate-900 px-2.5 py-0.5 rounded-full border border-white/5">
+                    <FileText className="w-3 h-3 text-indigo-400" />
+                    {currentCard.sourceCitation.filename}
+                    {currentCard.sourceCitation.pageNumber ? ` p.${currentCard.sourceCitation.pageNumber}` : ''}
                   </span>
                 )}
               </div>
 
-              {/* Front Content */}
-              <div className="space-y-4 my-auto text-center">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 block">
-                  Active Recall Prompt
-                </span>
-                <p className="text-xl sm:text-2xl font-extrabold text-white leading-relaxed">
+              {/* Front Question Content */}
+              <div className="space-y-4 my-auto text-center px-4">
+                <p className="text-lg sm:text-2xl font-bold text-white tracking-tight leading-relaxed">
                   {currentCard.front}
                 </p>
 
@@ -439,7 +422,6 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
                   Pedagogical Takeaway
                 </span>
 
-                {/* Golden Breakthrough Clip Play Button */}
                 {relatedSnippet && (
                   <button
                     type="button"
@@ -455,7 +437,7 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
                     }`}
                   >
                     {isAudioClipPlaying ? <Pause className="w-3 h-3 fill-current" /> : <Play className="w-3 h-3 fill-current" />}
-                    <span>{isAudioClipPlaying ? 'Pause Clip' : `Play Moment (${relatedSnippet.durationFormatted})`}</span>
+                    <span>{isAudioClipPlaying ? 'Pause Moment' : `Original Clip (${relatedSnippet.durationFormatted})`}</span>
                   </button>
                 )}
               </div>
@@ -474,19 +456,13 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
                     <p className="leading-relaxed">{currentCard.takeaway}</p>
                   </div>
                 )}
-
-                {relatedSnippet?.transcriptSnippet && (
-                  <div className="p-2.5 rounded-xl bg-slate-950/60 border border-white/5 text-[11px] text-slate-400 italic">
-                    &ldquo;{relatedSnippet.transcriptSnippet}&rdquo;
-                  </div>
-                )}
               </div>
 
               {/* SuperMemo SM-2 Spaced-Repetition Feedback Buttons */}
               <div className="pt-3 border-t border-white/10">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2 flex items-center justify-between">
                   <span>Rate Recall (SM-2 Interval Scheduling):</span>
-                  <span>Next: ~{currentCard.interval}d</span>
+                  <span>Interval: ~{currentCard.interval}d</span>
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
@@ -518,8 +494,8 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
                       e.stopPropagation();
                       handleRateSm2('good');
                     }}
-                    className="flex-1 py-2 text-xs font-semibold rounded-xl bg-indigo-500/20 hover:bg-indigo-500/35 text-indigo-200 border border-indigo-500/40 transition-all text-center"
-                    title="Good: ideal standard interval"
+                    className="flex-1 py-2 text-xs font-semibold rounded-xl bg-indigo-500/10 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 transition-all text-center"
+                    title="Good: standard advance"
                   >
                     Good (3)
                   </button>
@@ -529,8 +505,8 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
                       e.stopPropagation();
                       handleRateSm2('easy');
                     }}
-                    className="flex-1 py-2 text-xs font-semibold rounded-xl bg-emerald-500/20 hover:bg-emerald-500/35 text-emerald-300 border border-emerald-500/40 transition-all text-center"
-                    title="Easy: increase ease factor"
+                    className="flex-1 py-2 text-xs font-semibold rounded-xl bg-emerald-500/10 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 transition-all text-center"
+                    title="Easy: extended interval"
                   >
                     Easy (4)
                   </button>
@@ -540,28 +516,19 @@ export function FlashcardDeck({ artifact, onSeek }: FlashcardDeckProps) {
           </div>
         </div>
 
-        {/* Carousel Navigation Toolbar */}
-        <div className="flex items-center justify-between w-full max-w-2xl mt-4 px-2">
+        {/* Bottom Navigation Buttons */}
+        <div className="flex items-center gap-4 mt-6">
           <button
             type="button"
             onClick={handlePrev}
-            className="flex items-center gap-1 px-4 py-2 text-xs font-medium text-slate-300 hover:text-white bg-slate-900/80 hover:bg-slate-800 rounded-xl border border-white/10 transition-colors"
+            className="flex items-center gap-1 px-4 py-2 rounded-xl bg-slate-900 border border-white/10 text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <ChevronLeft className="w-4 h-4" /> Previous
           </button>
-
-          <button
-            type="button"
-            onClick={handleFlip}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 rounded-xl border border-white/10 transition-colors"
-          >
-            <RotateCw className="w-3.5 h-3.5" /> Flip
-          </button>
-
           <button
             type="button"
             onClick={handleNext}
-            className="flex items-center gap-1 px-4 py-2 text-xs font-medium text-slate-300 hover:text-white bg-slate-900/80 hover:bg-slate-800 rounded-xl border border-white/10 transition-colors"
+            className="flex items-center gap-1 px-4 py-2 rounded-xl bg-slate-900 border border-white/10 text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
           >
             Next <ChevronRight className="w-4 h-4" />
           </button>

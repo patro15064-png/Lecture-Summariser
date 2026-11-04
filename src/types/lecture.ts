@@ -36,13 +36,31 @@ export interface ConceptNode {
   keyTakeaways: string[];
   importance: ImportanceLevel;
   appearsAtTimestamps?: number[]; // All timestamps where concept is discussed
+  sourceCitation?: SourceCitation;
 }
+
+export interface SourceCitation {
+  filename: string;
+  pageNumber?: number;
+  timestampSeconds?: number;
+  timestampFormatted?: string;
+  snippet?: string;
+}
+
+export type GraphEdgeType =
+  | 'is-a'
+  | 'causes'
+  | 'part-of'
+  | 'depends-on'
+  | 'contrasts-with'
+  | 'prerequisite'
+  | 'related';
 
 export interface GraphEdge {
   id: string;
   source: string;
   target: string;
-  type: 'prerequisite' | 'related';
+  type: GraphEdgeType;
   label?: string;
 }
 
@@ -79,6 +97,8 @@ export interface Flashcard {
   startSeconds?: number;
   endSeconds?: number;
   audioClipUrl?: string;
+  audioExplanation?: string; // ~30-sec golden audio explanation script
+  sourceCitation?: SourceCitation;
   // SM-2 Spaced Repetition Scheduling Fields
   repetition: number;
   interval: number; // days
@@ -94,13 +114,105 @@ export interface DiagnosticOption {
   misconceptionExplanation: string; // Pedagogical analysis of this trap
 }
 
+export type QuizQuestionType =
+  | 'multiple_choice'
+  | 'true_false'
+  | 'fill_in_the_blank'
+  | 'short_answer';
+
+export type QuizDifficulty = 'easy' | 'medium' | 'hard';
+
 export interface DiagnosticQuestion {
   id: string;
   conceptId: string;
   timestampSeconds: number;
   question: string;
   options: DiagnosticOption[];
+  type?: QuizQuestionType;
+  difficulty?: QuizDifficulty;
+  fillBlankAnswer?: string;
+  sampleAnswer?: string;
+  gradingRubric?: string[];
   explanation: string;
+  sourceCitation?: SourceCitation;
+}
+
+export interface DetailedSummarySection {
+  sectionTitle: string;
+  content: string;
+  keyPoints: string[];
+  sourceCitation?: SourceCitation;
+}
+
+export interface StudySummaries {
+  oneLineTldr: string;
+  shortSummary: string;
+  detailedSections: DetailedSummarySection[];
+  keyTakeaways: string[];
+  eli12Summary: string;
+}
+
+export interface GlossaryTerm {
+  term: string;
+  definition: string;
+  context?: string;
+  sourceCitation?: SourceCitation;
+}
+
+export interface FormulaOrDateItem {
+  item: string;
+  description: string;
+  category: 'formula' | 'date' | 'milestone';
+  latex?: string;
+  sourceCitation?: SourceCitation;
+}
+
+export interface LikelyExamQuestion {
+  question: string;
+  difficulty: 'standard' | 'challenging';
+  answerOutline: string;
+  keyPoints: string[];
+  sourceCitation?: SourceCitation;
+}
+
+export interface StudyPlanSession {
+  dayOrSession: string;
+  topic: string;
+  activities: string[];
+  timeMinutes: number;
+}
+
+export interface StudyKitExtras {
+  glossary: GlossaryTerm[];
+  importantFormulasAndDates: FormulaOrDateItem[];
+  likelyExamQuestions: LikelyExamQuestion[];
+  studyPlan: StudyPlanSession[];
+}
+
+export interface FailedFileRecord {
+  id: string;
+  filename: string;
+  reason: string;
+  errorDetails?: string;
+  fileSize?: number;
+}
+
+export type UploadFileStatus = 'queued' | 'reading' | 'analysing' | 'done' | 'failed';
+
+export interface UploadedFileItem {
+  id: string;
+  file?: File;
+  name: string;
+  size: number;
+  type: string;
+  status: UploadFileStatus;
+  progressPercent?: number;
+  progressMessage?: string;
+  errorReason?: string;
+  previewUrl?: string;
+  extractedText?: string;
+  rawPayload?: string;
+  mimeCategory?: 'image' | 'pdf' | 'document' | 'audio' | 'video' | 'text' | 'link' | 'unknown';
 }
 
 export interface FeynmanEvaluation {
@@ -143,6 +255,10 @@ export interface LectureArtifact {
   flashcards: Flashcard[];
   diagnosticQuestions: DiagnosticQuestion[];
   goldenSnippets: GoldenAudioSnippet[];
+  summaries?: StudySummaries;
+  extras?: StudyKitExtras;
+  sourceFiles?: string[];
+  failedFiles?: FailedFileRecord[];
   isSample?: boolean;
   createdAt: string;
 }
