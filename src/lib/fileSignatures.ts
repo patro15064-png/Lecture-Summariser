@@ -418,3 +418,4 @@ export async function tryBestEffortFallback(
     diagnosticReport: `Could not parse "${filename}". We attempted: (1) UTF-8 text extraction, and (2) visual image decoding, but neither yielded valid study content. To fix this: please export or convert this file into a standard format like PDF, TXT, DOCX, or PNG and re-upload.`,
   };
 }
+
